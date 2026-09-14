@@ -1,0 +1,1082 @@
+{
+  "source": "test_images/cup_classroom.jpg",
+  "image_size": [
+    2666,
+    2000
+  ],
+  "device": "cpu",
+  "infer_ms": 54.2,
+  "objects": [
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.8457,
+      "bbox_xyxy": [
+        1313,
+        1785,
+        1459,
+        2000
+      ],
+      "center_xy": [
+        1386,
+        1892
+      ],
+      "area_ratio": 0.00589
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.7898,
+      "bbox_xyxy": [
+        2247,
+        1574,
+        2385,
+        1754
+      ],
+      "center_xy": [
+        2316,
+        1664
+      ],
+      "area_ratio": 0.00466
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.5306,
+      "bbox_xyxy": [
+        1554,
+        1700,
+        1687,
+        1875
+      ],
+      "center_xy": [
+        1620,
+        1787
+      ],
+      "area_ratio": 0.00437
+    },
+    {
+      "object_id": "table",
+      "name_cn": "桌子",
+      "matched_prompt": "desk",
+      "confidence": 0.3789,
+      "bbox_xyxy": [
+        443,
+        967,
+        2657,
+        1998
+      ],
+      "center_xy": [
+        1550,
+        1482
+      ],
+      "area_ratio": 0.4281
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.347,
+      "bbox_xyxy": [
+        2345,
+        1486,
+        2440,
+        1655
+      ],
+      "center_xy": [
+        2392,
+        1570
+      ],
+      "area_ratio": 0.00301
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.329,
+      "bbox_xyxy": [
+        1811,
+        1481,
+        1942,
+        1636
+      ],
+      "center_xy": [
+        1876,
+        1558
+      ],
+      "area_ratio": 0.00381
+    },
+    {
+      "object_id": "table",
+      "name_cn": "桌子",
+      "matched_prompt": "desk",
+      "confidence": 0.2711,
+      "bbox_xyxy": [
+        230,
+        1495,
+        2584,
+        2000
+      ],
+      "center_xy": [
+        1407,
+        1747
+      ],
+      "area_ratio": 0.22295
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.2381,
+      "bbox_xyxy": [
+        1618,
+        1542,
+        1738,
+        1710
+      ],
+      "center_xy": [
+        1678,
+        1626
+      ],
+      "area_ratio": 0.00378
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.2381,
+      "bbox_xyxy": [
+        2142,
+        109,
+        2290,
+        286
+      ],
+      "center_xy": [
+        2216,
+        197
+      ],
+      "area_ratio": 0.00491
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.2139,
+      "bbox_xyxy": [
+        1944,
+        1191,
+        2070,
+        1331
+      ],
+      "center_xy": [
+        2007,
+        1261
+      ],
+      "area_ratio": 0.00331
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.208,
+      "bbox_xyxy": [
+        1675,
+        1380,
+        1809,
+        1549
+      ],
+      "center_xy": [
+        1742,
+        1464
+      ],
+      "area_ratio": 0.00425
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.2048,
+      "bbox_xyxy": [
+        1470,
+        1018,
+        1572,
+        1222
+      ],
+      "center_xy": [
+        1521,
+        1120
+      ],
+      "area_ratio": 0.0039
+    },
+    {
+      "object_id": "hand",
+      "name_cn": "手",
+      "matched_prompt": "hand",
+      "confidence": 0.203,
+      "bbox_xyxy": [
+        1455,
+        729,
+        1552,
+        868
+      ],
+      "center_xy": [
+        1503,
+        798
+      ],
+      "area_ratio": 0.00253
+    },
+    {
+      "object_id": "hand",
+      "name_cn": "手",
+      "matched_prompt": "hand",
+      "confidence": 0.1637,
+      "bbox_xyxy": [
+        574,
+        1555,
+        702,
+        1765
+      ],
+      "center_xy": [
+        638,
+        1660
+      ],
+      "area_ratio": 0.00504
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.1547,
+      "bbox_xyxy": [
+        1819,
+        876,
+        1957,
+        1055
+      ],
+      "center_xy": [
+        1888,
+        965
+      ],
+      "area_ratio": 0.00463
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.142,
+      "bbox_xyxy": [
+        1404,
+        1400,
+        1535,
+        1607
+      ],
+      "center_xy": [
+        1469,
+        1503
+      ],
+      "area_ratio": 0.00509
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.1378,
+      "bbox_xyxy": [
+        1463,
+        1572,
+        1616,
+        1739
+      ],
+      "center_xy": [
+        1539,
+        1655
+      ],
+      "area_ratio": 0.00479
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.1349,
+      "bbox_xyxy": [
+        1736,
+        1197,
+        1950,
+        1353
+      ],
+      "center_xy": [
+        1843,
+        1275
+      ],
+      "area_ratio": 0.00626
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.13,
+      "bbox_xyxy": [
+        902,
+        1649,
+        1012,
+        1859
+      ],
+      "center_xy": [
+        957,
+        1754
+      ],
+      "area_ratio": 0.00433
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.1213,
+      "bbox_xyxy": [
+        2067,
+        1179,
+        2207,
+        1332
+      ],
+      "center_xy": [
+        2137,
+        1255
+      ],
+      "area_ratio": 0.00402
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.1109,
+      "bbox_xyxy": [
+        2047,
+        1461,
+        2180,
+        1615
+      ],
+      "center_xy": [
+        2113,
+        1538
+      ],
+      "area_ratio": 0.00384
+    },
+    {
+      "object_id": "hand",
+      "name_cn": "手",
+      "matched_prompt": "hand",
+      "confidence": 0.1076,
+      "bbox_xyxy": [
+        1304,
+        548,
+        1388,
+        629
+      ],
+      "center_xy": [
+        1346,
+        588
+      ],
+      "area_ratio": 0.00128
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.1011,
+      "bbox_xyxy": [
+        2124,
+        1316,
+        2260,
+        1464
+      ],
+      "center_xy": [
+        2192,
+        1390
+      ],
+      "area_ratio": 0.00377
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0935,
+      "bbox_xyxy": [
+        1421,
+        1730,
+        1559,
+        1882
+      ],
+      "center_xy": [
+        1490,
+        1806
+      ],
+      "area_ratio": 0.00393
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0859,
+      "bbox_xyxy": [
+        1678,
+        1673,
+        1798,
+        1832
+      ],
+      "center_xy": [
+        1738,
+        1752
+      ],
+      "area_ratio": 0.00358
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.077,
+      "bbox_xyxy": [
+        1144,
+        958,
+        1285,
+        1168
+      ],
+      "center_xy": [
+        1214,
+        1063
+      ],
+      "area_ratio": 0.00555
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0746,
+      "bbox_xyxy": [
+        1928,
+        1459,
+        2039,
+        1607
+      ],
+      "center_xy": [
+        1983,
+        1533
+      ],
+      "area_ratio": 0.00308
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0735,
+      "bbox_xyxy": [
+        2190,
+        1168,
+        2286,
+        1314
+      ],
+      "center_xy": [
+        2238,
+        1241
+      ],
+      "area_ratio": 0.00263
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0719,
+      "bbox_xyxy": [
+        964,
+        1480,
+        1063,
+        1679
+      ],
+      "center_xy": [
+        1013,
+        1579
+      ],
+      "area_ratio": 0.00369
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0671,
+      "bbox_xyxy": [
+        1802,
+        1373,
+        1903,
+        1518
+      ],
+      "center_xy": [
+        1852,
+        1445
+      ],
+      "area_ratio": 0.00275
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0656,
+      "bbox_xyxy": [
+        2084,
+        1599,
+        2216,
+        1759
+      ],
+      "center_xy": [
+        2150,
+        1679
+      ],
+      "area_ratio": 0.00396
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0643,
+      "bbox_xyxy": [
+        1859,
+        1199,
+        1951,
+        1352
+      ],
+      "center_xy": [
+        1905,
+        1275
+      ],
+      "area_ratio": 0.00264
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.064,
+      "bbox_xyxy": [
+        1892,
+        1041,
+        2011,
+        1196
+      ],
+      "center_xy": [
+        1951,
+        1118
+      ],
+      "area_ratio": 0.00346
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0594,
+      "bbox_xyxy": [
+        1869,
+        1331,
+        1994,
+        1476
+      ],
+      "center_xy": [
+        1931,
+        1403
+      ],
+      "area_ratio": 0.0034
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0586,
+      "bbox_xyxy": [
+        2114,
+        282,
+        2252,
+        421
+      ],
+      "center_xy": [
+        2183,
+        351
+      ],
+      "area_ratio": 0.0036
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0523,
+      "bbox_xyxy": [
+        1468,
+        1242,
+        1592,
+        1405
+      ],
+      "center_xy": [
+        1530,
+        1323
+      ],
+      "area_ratio": 0.00379
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0512,
+      "bbox_xyxy": [
+        2189,
+        872,
+        2306,
+        1027
+      ],
+      "center_xy": [
+        2247,
+        949
+      ],
+      "area_ratio": 0.0034
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0483,
+      "bbox_xyxy": [
+        1252,
+        1358,
+        1410,
+        1596
+      ],
+      "center_xy": [
+        1331,
+        1477
+      ],
+      "area_ratio": 0.00705
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0434,
+      "bbox_xyxy": [
+        2203,
+        1586,
+        2260,
+        1711
+      ],
+      "center_xy": [
+        2231,
+        1648
+      ],
+      "area_ratio": 0.00134
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0426,
+      "bbox_xyxy": [
+        1730,
+        1215,
+        1860,
+        1382
+      ],
+      "center_xy": [
+        1795,
+        1298
+      ],
+      "area_ratio": 0.00407
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0407,
+      "bbox_xyxy": [
+        527,
+        1223,
+        623,
+        1434
+      ],
+      "center_xy": [
+        575,
+        1328
+      ],
+      "area_ratio": 0.0038
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0395,
+      "bbox_xyxy": [
+        593,
+        990,
+        677,
+        1120
+      ],
+      "center_xy": [
+        635,
+        1055
+      ],
+      "area_ratio": 0.00205
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0388,
+      "bbox_xyxy": [
+        1042,
+        1782,
+        1161,
+        1997
+      ],
+      "center_xy": [
+        1101,
+        1889
+      ],
+      "area_ratio": 0.0048
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0379,
+      "bbox_xyxy": [
+        1954,
+        889,
+        2080,
+        1050
+      ],
+      "center_xy": [
+        2017,
+        969
+      ],
+      "area_ratio": 0.0038
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0365,
+      "bbox_xyxy": [
+        1476,
+        1090,
+        1573,
+        1221
+      ],
+      "center_xy": [
+        1524,
+        1155
+      ],
+      "area_ratio": 0.00238
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0362,
+      "bbox_xyxy": [
+        1154,
+        1308,
+        1366,
+        1515
+      ],
+      "center_xy": [
+        1260,
+        1411
+      ],
+      "area_ratio": 0.00823
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.036,
+      "bbox_xyxy": [
+        1162,
+        1524,
+        1305,
+        1727
+      ],
+      "center_xy": [
+        1233,
+        1625
+      ],
+      "area_ratio": 0.00544
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0303,
+      "bbox_xyxy": [
+        1941,
+        1455,
+        2082,
+        1726
+      ],
+      "center_xy": [
+        2011,
+        1590
+      ],
+      "area_ratio": 0.00717
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0263,
+      "bbox_xyxy": [
+        2191,
+        1526,
+        2281,
+        1709
+      ],
+      "center_xy": [
+        2236,
+        1617
+      ],
+      "area_ratio": 0.00309
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0253,
+      "bbox_xyxy": [
+        1527,
+        1414,
+        1660,
+        1569
+      ],
+      "center_xy": [
+        1593,
+        1491
+      ],
+      "area_ratio": 0.00387
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0252,
+      "bbox_xyxy": [
+        2216,
+        587,
+        2326,
+        748
+      ],
+      "center_xy": [
+        2271,
+        667
+      ],
+      "area_ratio": 0.00332
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0251,
+      "bbox_xyxy": [
+        1727,
+        1528,
+        1837,
+        1675
+      ],
+      "center_xy": [
+        1782,
+        1601
+      ],
+      "area_ratio": 0.00303
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0243,
+      "bbox_xyxy": [
+        1568,
+        1498,
+        1759,
+        1828
+      ],
+      "center_xy": [
+        1663,
+        1663
+      ],
+      "area_ratio": 0.01182
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0235,
+      "bbox_xyxy": [
+        1399,
+        1418,
+        1621,
+        1743
+      ],
+      "center_xy": [
+        1510,
+        1580
+      ],
+      "area_ratio": 0.01353
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0225,
+      "bbox_xyxy": [
+        1756,
+        1033,
+        1898,
+        1218
+      ],
+      "center_xy": [
+        1827,
+        1125
+      ],
+      "area_ratio": 0.00493
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0222,
+      "bbox_xyxy": [
+        2126,
+        1013,
+        2326,
+        1179
+      ],
+      "center_xy": [
+        2226,
+        1096
+      ],
+      "area_ratio": 0.00623
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0219,
+      "bbox_xyxy": [
+        1027,
+        1359,
+        1127,
+        1554
+      ],
+      "center_xy": [
+        1077,
+        1456
+      ],
+      "area_ratio": 0.00366
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0219,
+      "bbox_xyxy": [
+        2056,
+        415,
+        2313,
+        595
+      ],
+      "center_xy": [
+        2184,
+        505
+      ],
+      "area_ratio": 0.00868
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0218,
+      "bbox_xyxy": [
+        1395,
+        1005,
+        1477,
+        1210
+      ],
+      "center_xy": [
+        1436,
+        1107
+      ],
+      "area_ratio": 0.00315
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0216,
+      "bbox_xyxy": [
+        1987,
+        1444,
+        2119,
+        1602
+      ],
+      "center_xy": [
+        2053,
+        1523
+      ],
+      "area_ratio": 0.00391
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0213,
+      "bbox_xyxy": [
+        2076,
+        882,
+        2195,
+        1038
+      ],
+      "center_xy": [
+        2135,
+        960
+      ],
+      "area_ratio": 0.00348
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0207,
+      "bbox_xyxy": [
+        1286,
+        1910,
+        1509,
+        2000
+      ],
+      "center_xy": [
+        1397,
+        1955
+      ],
+      "area_ratio": 0.00376
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.0202,
+      "bbox_xyxy": [
+        682,
+        773,
+        780,
+        921
+      ],
+      "center_xy": [
+        731,
+        847
+      ],
+      "area_ratio": 0.00272
+    }
+  ]
+}

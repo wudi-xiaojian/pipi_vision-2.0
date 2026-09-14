@@ -1,0 +1,113 @@
+{
+  "source": "test_images/cup_blue_table.jpg",
+  "image_size": [
+    2754,
+    3975
+  ],
+  "device": "mps",
+  "infer_ms": 5.3,
+  "objects": [
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.7581,
+      "bbox_xyxy": [
+        897,
+        1653,
+        1470,
+        2490
+      ],
+      "center_xy": [
+        1183,
+        2071
+      ],
+      "area_ratio": 0.04381
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.6781,
+      "bbox_xyxy": [
+        404,
+        2664,
+        949,
+        3387
+      ],
+      "center_xy": [
+        676,
+        3025
+      ],
+      "area_ratio": 0.03599
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.4443,
+      "bbox_xyxy": [
+        1442,
+        2637,
+        1950,
+        3386
+      ],
+      "center_xy": [
+        1696,
+        3011
+      ],
+      "area_ratio": 0.03476
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.4067,
+      "bbox_xyxy": [
+        1179,
+        2189,
+        1715,
+        2978
+      ],
+      "center_xy": [
+        1447,
+        2583
+      ],
+      "area_ratio": 0.03863
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.345,
+      "bbox_xyxy": [
+        575,
+        2265,
+        1153,
+        2987
+      ],
+      "center_xy": [
+        864,
+        2626
+      ],
+      "area_ratio": 0.03812
+    },
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "stacked paper cups",
+      "confidence": 0.0248,
+      "bbox_xyxy": [
+        1172,
+        2186,
+        1956,
+        3367
+      ],
+      "center_xy": [
+        1564,
+        2776
+      ],
+      "area_ratio": 0.08458
+    }
+  ]
+}

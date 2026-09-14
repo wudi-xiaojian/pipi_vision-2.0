@@ -1,0 +1,28 @@
+{
+  "source": "test_images/IMG_2774.JPG",
+  "image_size": [
+    4284,
+    5712
+  ],
+  "device": "mps",
+  "infer_ms": 4.6,
+  "objects": [
+    {
+      "object_id": "paper_cup",
+      "name_cn": "纸杯",
+      "matched_prompt": "paper cup",
+      "confidence": 0.6887,
+      "bbox_xyxy": [
+        1357,
+        1451,
+        2769,
+        4324
+      ],
+      "center_xy": [
+        2063,
+        2887
+      ],
+      "area_ratio": 0.16578
+    }
+  ]
+}
