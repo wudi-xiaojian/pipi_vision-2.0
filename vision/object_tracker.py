@@ -47,9 +47,15 @@ class TrackedObject:
     last_seen_frame: int = 0
     trail: list[list[int]] = field(default_factory=list)
 
+    # 真实检测帧之间的测量速度。
+    # 注意：这里只用于显示/Activity Engine，不参与任何追踪决策。
+    measured_speed_px_s: float = 0.0
+    last_measured_center: list[float] | None = None
+    last_measured_frame: int | None = None
+
     @property
     def speed_px_s(self) -> float:
-        return math.hypot(self.kf_state[4], self.kf_state[5])
+        return float(self.measured_speed_px_s)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -196,6 +202,30 @@ class SimpleTracker:
             w, h = x2 - x1, y2 - y1
             z = np.array([cx, cy, w, h], dtype=np.float64)
 
+            # ---------------------------------------------------------
+            # 速度只根据“实际检测到的中心点”计算。
+            #
+            # 重要：
+            # 1. 不修改 Kalman 的预测/更新逻辑。
+            # 2. 不把速度用于匹配、ID、coasting、merge 等追踪决策。
+            # 3. 只作为 speed_px_s 的显示/Activity Engine 数据。
+            # ---------------------------------------------------------
+            if (
+                t.last_measured_center is not None
+                and t.last_measured_frame is not None
+            ):
+                frame_delta = frame_idx - t.last_measured_frame
+
+                if frame_delta > 0:
+                    dx = cx - t.last_measured_center[0]
+                    dy = cy - t.last_measured_center[1]
+                    distance = math.hypot(dx, dy)
+                    dt_seconds = frame_delta / (fps if fps > 0 else 30.0)
+                    t.measured_speed_px_s = distance / dt_seconds
+
+            t.last_measured_center = [float(cx), float(cy)]
+            t.last_measured_frame = frame_idx
+
             t.kf.update(z)
 
             best_bbox = t.kf.get_bbox_xyxy()
@@ -314,6 +344,9 @@ class SimpleTracker:
             last_seen_frame=frame_idx,
             hits=1,
             trail=[[int(cx), int(cy)]],
+            measured_speed_px_s=0.0,
+            last_measured_center=[float(cx), float(cy)],
+            last_measured_frame=frame_idx,
         )
         self.tracks[self._next_id] = t
         self._next_id += 1

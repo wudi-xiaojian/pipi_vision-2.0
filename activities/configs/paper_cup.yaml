@@ -1,54 +1,33 @@
-# 活动配置：纸杯搭建
-#
-# 这个文件是"活动知识描述"，不是训练数据。换活动时只改这里 + prompts，
-# 不需要重新训练视觉模型。
-#
-# objects 段说明：
-#   id        内部标识，代码里用它取结果（result.top("paper_cup")）
-#   name_cn   展示用的中文名，画框时的标签
-#   prompts   喂给 YOLO-World 的英文短语列表，取其中最高分。
-#             CLIP 文本编码器对英文效果更好，所以不要直接写中文。
-#             多个短语 = 提高召回（换角度/换说法时更稳）
-#   conf      该物体的置信度阈值。
-#
-# ── 阈值标定记录（2026-09-14，基于 3 张实拍图，--min-conf 0.01 扫描）──
-# 实测分数分布：
-#   纸杯   清晰近景 0.34~0.84；密集杯塔里的小杯/远杯只有 0.02~0.06
-#          → 计数必须用低阈值 0.02，代价是混入少量误检，靠后续几何/跟踪过滤
-#   手     真手 0.12~0.22；0.05 以下基本是噪声（橙色杯子也会触发 hand）
-#          → 0.10
-#   桌子   真桌面 0.38~0.73；泡沫垫/椅子/窗框在 0.03~0.27 误报
-#          → 0.15（桌面之后还要做单应标定，误报影响可控）
-#   剪刀/胶水/彩笔  真物体也只有 0.05~0.08 → 0.08，宁可漏不可滥
-#
-# prompt 裁剪记录（同一批实测中发现的跨类混淆）：
-#   ✗ 删 "child hand"    —— 命中了孩子整个上半身（43% 画面占比的大框）
-#   ✗ 删 "crayon"        —— 红色花纹纸杯被当成蜡笔
-#   ✗ 删 "colored pencil"—— 同上，红杯子触发
-#   ✗ 删 "disposable cup"—— 与 "paper cup" 高度冗余，白占类别数拖慢推理
-#   保留多 prompt 的原则：只在"换个说法能捞回真漏检"时加，不为保险而堆。
-
 activity:
   id: paper_cup_building
   name: 神奇的纸杯搭建
 
   objects:
     - id: paper_cup
-      name_cn: 纸杯
+      name: 纸杯
       prompts:
         - paper cup
         - white paper cup
         - stacked paper cups
-      conf: 0.02
+      conf: 0.5
+
+  engine:
+    # Activity Engine 的通用时序参数；视觉层仍可按需要更高频运行。
+    hand_near_distance_px: 120
+    moving_speed_px_s: 45
+    stopped_speed_px_s: 18
+    persistence_ms: 250
+    event_cooldown_ms: 450
+    stack_vertical_gap_px: 45
+    stack_horizontal_ratio: 0.65
+
+  completion:
+    # 第一版只做“稳定结构”基础判断，后续可加入结构形状/高度等规则。
+    min_stacked_objects: 3
 
   steps:
-    - id: 1
-      name: 拿起纸杯
-    - id: 2
-      name: 移动纸杯
-    - id: 3
-      name: 放置纸杯
-    - id: 4
-      name: 堆叠纸杯
-    - id: 5
-      name: 完成搭建
+    - 拿起纸杯
+    - 移动纸杯
+    - 放置纸杯
+    - 堆叠纸杯
+    - 完成搭建

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -23,6 +24,8 @@ from vision.object_detector import (
 )
 from vision.hand_detector import HandDetector
 from vision.hand_types import HandObservation
+from perception_serializer import serialize_perception
+from activities.activity_engine import ActivityEngine
 
 
 # ============================================================
@@ -433,6 +436,54 @@ def draw_info_panel(
         y += 24
 
 
+def draw_activity_panel(
+    canvas: np.ndarray,
+    engine: ActivityEngine,
+    events: list[dict],
+) -> None:
+    x = 20
+    y = canvas.shape[0] - 105
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    cv2.putText(
+        canvas,
+        f"Activity: {engine.activity_name}",
+        (x, y),
+        font,
+        0.62,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    y += 25
+    cv2.putText(
+        canvas,
+        f"State: {engine.last_state} | Engine: {engine.total_event_count} events",
+        (x, y),
+        font,
+        0.52,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    y += 25
+    if events:
+        latest = events[-1]["event"]
+        text = f"Event: {latest['type']}  conf={latest['confidence']:.2f}"
+    else:
+        text = "Event: 无新事件"
+    cv2.putText(
+        canvas,
+        text,
+        (x, y),
+        font,
+        0.55,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+
 # ============================================================
 # 主程序
 # ============================================================
@@ -536,6 +587,25 @@ def main():
         help="不显示 OpenCV 窗口",
     )
 
+    parser.add_argument(
+        "--activity-rate",
+        type=float,
+        default=10.0,
+        help="Activity Engine 输入频率，默认 10Hz",
+    )
+
+    parser.add_argument(
+        "--activity-jsonl",
+        default=None,
+        help="输出 Activity Engine 输入 Perception JSONL；不指定则不落盘",
+    )
+
+    parser.add_argument(
+        "--event-jsonl",
+        default=None,
+        help="输出 Activity Engine 事件 JSONL；不指定则不落盘",
+    )
+
     args = parser.parse_args()
 
     # --------------------------------------------------------
@@ -611,6 +681,36 @@ def main():
             model_path=args.hand_model,
             num_hands=2,
         )
+
+    # --------------------------------------------------------
+    # Activity Engine
+    # --------------------------------------------------------
+    cfg_path = Path(args.config)
+    cfg_raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg_body = cfg_raw.get("activity", cfg_raw)
+    activity_id = str(cfg_body.get("id", cfg_path.stem))
+    activity_name = str(cfg_body.get("name", activity_id))
+
+    activity_rate = max(0.1, float(args.activity_rate))
+    activity_interval = 1.0 / activity_rate
+    activity_engine = ActivityEngine(
+        cfg_path,
+        window_seconds=2.0,
+    )
+
+    perception_file = None
+    event_file = None
+    if args.activity_jsonl:
+        perception_path = Path(args.activity_jsonl)
+        perception_path.parent.mkdir(parents=True, exist_ok=True)
+        perception_file = perception_path.open("w", encoding="utf-8")
+    if args.event_jsonl:
+        event_path = Path(args.event_jsonl)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_file = event_path.open("w", encoding="utf-8")
+
+    last_activity_time = 0.0
+    last_events = []
 
     # --------------------------------------------------------
     # 运行
@@ -797,6 +897,46 @@ def main():
                 )
 
             # ------------------------------------------------
+            # Activity Engine：10Hz 标准化感知输入
+            # ------------------------------------------------
+            now_activity = time.perf_counter()
+            if now_activity - last_activity_time >= activity_interval:
+                perception = serialize_perception(
+                    frame_index=frame_index,
+                    timestamp=time.time(),
+                    frame_width=width,
+                    frame_height=height,
+                    fps=display_fps,
+                    hands=hands,
+                    tracker_result=result,
+                    activity_id=activity_id,
+                    activity_name=activity_name,
+                )
+                last_activity_time = now_activity
+
+                if perception_file is not None:
+                    perception_file.write(
+                        json.dumps(perception, ensure_ascii=False) + "\n"
+                    )
+
+                events = activity_engine.update(perception)
+                last_events = events
+
+                for event in events:
+                    event_type = event["event"]["type"]
+                    confidence = event["event"]["confidence"]
+                    track_id = event["event"].get("object", {}).get("track_id")
+                    object_text = f"  物体#{track_id}" if track_id is not None else ""
+                    print(
+                        f"[Activity] {event_type}{object_text} "
+                        f"置信度={confidence:.2f}"
+                    )
+                    if event_file is not None:
+                        event_file.write(
+                            json.dumps(event, ensure_ascii=False) + "\n"
+                        )
+
+            # ------------------------------------------------
             # 信息面板
             # ------------------------------------------------
 
@@ -805,6 +945,12 @@ def main():
                 hands,
                 result.tracks,
                 display_fps,
+            )
+
+            draw_activity_panel(
+                canvas,
+                activity_engine,
+                last_events,
             )
 
             # ------------------------------------------------
