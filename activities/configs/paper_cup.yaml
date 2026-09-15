@@ -1,3 +1,14 @@
+# PiPi Vision 2.0
+# 神奇的纸杯搭建
+#
+# 约定：
+# 1. objects 是活动需要观察的目标，属于 Activity 配置。
+# 2. vision.* 是 Vision Layer 的运行参数。
+# 3. engine.* 只包含通用时序/行为规则。
+# 4. runtime.* 控制主循环和 Activity Engine 的采样频率。
+# 5. 不在这里定义 STACKED / STRUCTURE_OK / STEP_COMPLETED /
+#    ACTIVITY_COMPLETED 等活动语义；这些交给 Activity Understanding / VLM。
+
 activity:
   id: paper_cup_building
   name: 神奇的纸杯搭建
@@ -11,19 +22,68 @@ activity:
         - stacked paper cups
       conf: 0.5
 
-  # 这里只保留 ActivityEngine 所需的通用时序参数。
-  # STACKED / STRUCTURE_OK / STEP_COMPLETED / ACTIVITY_COMPLETED
-  # 等活动语义不在这里定义，由 Activity Understanding / VLM 负责。
+  vision:
+    object_detector:
+      model_size: s
+      imgsz: 640
+      device: auto
+      dup_iou: 0.65
+
+    tracker:
+      # 检测频率与轨迹匹配
+      detect_every: 1
+      match_iou: 0.25
+      max_coast_frames: 5
+      min_hits: 3
+
+      # 多轨迹重复框合并
+      merge_iou: 0.60
+      merge_contain: 0.80
+      merge_streak: 3
+
+      # 速度估计：中位数 + EMA，抑制 bbox 抖动尖峰
+      speed_history_size: 5
+      speed_ema_alpha: 0.35
+
+      # 异常中心跳变过滤
+      max_center_jump_ratio: 3.0
+      low_confidence_threshold: 0.10
+
+      # 丢检后的速度衰减
+      coast_speed_decay: 0.80
+
+    hand_detector:
+      model_path: models/hand_landmarker.task
+      num_hands: 2
+      min_hand_detection_confidence: 0.5
+      min_hand_presence_confidence: 0.5
+      min_tracking_confidence: 0.5
+
   engine:
+    # 手腕到物体 bbox 的距离 <= 此值，才视为 HAND_NEAR_OBJECT
     hand_near_distance_px: 120
+
+    # 通用运动阈值
     moving_speed_px_s: 45
-    stopped_speed_px_s: 18
+    stopped_speed_px_s: 30
+
+    # 通用事件/状态防抖
     persistence_ms: 250
     event_cooldown_ms: 450
 
-  steps:
-    - 拿起纸杯
-    - 移动纸杯
-    - 放置纸杯
-    - 堆叠纸杯
-    - 完成搭建
+    # Activity Engine 内部对象状态的过期清理
+    stale_timeout_seconds: 4.0
+
+    # 通用事件置信度计算参数
+    place_confidence_base: 0.88
+    pickup_speed_scale: 400.0
+    moving_speed_scale: 500.0
+
+  state_persistence_ms:
+    IDLE: 500
+    INTERACTING: 300
+    MOVING_OBJECT: 300
+
+  runtime:
+    activity_rate_hz: 10
+    window_seconds: 2.0

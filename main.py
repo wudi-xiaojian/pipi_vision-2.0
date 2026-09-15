@@ -41,10 +41,28 @@ HAND_MODEL_PATH = (
 # 配置
 # ============================================================
 
-def build_specs(args) -> list[ObjectSpec]:
+def resolve_project_path(value: str | Path) -> Path:
+    """相对路径统一以项目根目录为基准。"""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else ROOT / path
 
+
+def load_activity_config(config_path: str | Path) -> dict:
+    """加载并返回 activity 配置主体。"""
+    path = resolve_project_path(config_path)
+    if not path.exists():
+        sys.exit(f"配置文件不存在: {path}")
+
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    body = raw.get("activity", raw)
+    if not isinstance(body, dict):
+        sys.exit(f"配置文件格式错误: {path}")
+    return body
+
+
+def build_specs(args, cfg_body: dict) -> list[ObjectSpec]:
+    """从 YAML 构建物体规格；--prompt 仅作为临时覆盖入口。"""
     if args.prompt:
-
         return [
             ObjectSpec(
                 id=p.replace(" ", "_"),
@@ -55,38 +73,17 @@ def build_specs(args) -> list[ObjectSpec]:
             for p in args.prompt
         ]
 
-    if not args.config:
-        sys.exit(
-            "必须提供 --config <yaml> "
-            "或 --prompt <英文短语...>"
-        )
-
-    cfg_path = Path(args.config)
-
-    if not cfg_path.exists():
-        sys.exit(
-            f"配置文件不存在: {cfg_path}"
-        )
-
-    cfg = yaml.safe_load(
-        cfg_path.read_text(
-            encoding="utf-8"
-        )
-    ) or {}
-
-    body = cfg.get(
-        "activity",
-        cfg,
-    )
-
-    specs = specs_from_config(body)
-
+    specs = specs_from_config(cfg_body)
     if not specs:
-        sys.exit(
-            f"配置里没有可用的 objects: {cfg_path}"
-        )
-
+        sys.exit(f"配置里没有可用的 objects: {args.config}")
     return specs
+
+
+def cfg_value(args_value, config_value, default):
+    """CLI 显式传值优先，否则使用 YAML，最后使用代码兜底值。"""
+    return default if args_value is None and config_value is None else (
+        config_value if args_value is None else args_value
+    )
 
 
 # ============================================================
@@ -523,56 +520,63 @@ def main():
 
     parser.add_argument(
         "--size",
-        default="s",
+        default=None,
         choices=list("nsmlx"),
+        help="YOLO-World 模型规模；默认读取 YAML vision.object_detector.model_size",
     )
 
     parser.add_argument(
         "--imgsz",
         type=int,
-        default=640,
+        default=None,
+        help="YOLO 输入尺寸；默认读取 YAML vision.object_detector.imgsz",
     )
 
     parser.add_argument(
         "--device",
-        default="auto",
+        default=None,
+        help="推理设备；默认读取 YAML vision.object_detector.device",
     )
 
     parser.add_argument(
         "--dup-iou",
         type=float,
-        default=0.65,
+        default=None,
+        help="检测框去重 IoU；默认读取 YAML vision.object_detector.dup_iou",
     )
 
     parser.add_argument(
         "--detect-every",
         type=int,
-        default=1,
-        help="每 N 帧运行一次 YOLO",
+        default=None,
+        help="每 N 帧运行一次 YOLO；默认读取 YAML vision.tracker.detect_every",
     )
 
     parser.add_argument(
         "--match-iou",
         type=float,
-        default=0.25,
+        default=None,
+        help="轨迹匹配 IoU；默认读取 YAML vision.tracker.match_iou",
     )
 
     parser.add_argument(
         "--max-coast",
         type=int,
-        default=75,
+        default=None,
+        help="最大滑行帧数；默认读取 YAML vision.tracker.max_coast_frames",
     )
 
     parser.add_argument(
         "--min-hits",
         type=int,
-        default=3,
+        default=None,
+        help="轨迹确认所需命中次数；默认读取 YAML vision.tracker.min_hits",
     )
 
     parser.add_argument(
         "--hand-model",
-        default=str(HAND_MODEL_PATH),
-        help="MediaPipe hand_landmarker.task",
+        default=None,
+        help="手部模型路径；默认读取 YAML vision.hand_detector.model_path",
     )
 
     parser.add_argument(
@@ -590,8 +594,8 @@ def main():
     parser.add_argument(
         "--activity-rate",
         type=float,
-        default=10.0,
-        help="Activity Engine 输入频率，默认 10Hz",
+        default=None,
+        help="Activity Engine 输入频率；默认读取 YAML runtime.activity_rate_hz",
     )
 
     parser.add_argument(
@@ -608,11 +612,28 @@ def main():
 
     args = parser.parse_args()
 
+    cfg_body = load_activity_config(args.config)
+    detector_cfg = cfg_body.get("vision", {}).get("object_detector", {}) or {}
+    tracker_cfg = cfg_body.get("vision", {}).get("tracker", {}) or {}
+    hand_cfg = cfg_body.get("vision", {}).get("hand_detector", {}) or {}
+    runtime_cfg = cfg_body.get("runtime", {}) or {}
+
+    args.size = cfg_value(args.size, detector_cfg.get("model_size"), "s")
+    args.imgsz = int(cfg_value(args.imgsz, detector_cfg.get("imgsz"), 640))
+    args.device = cfg_value(args.device, detector_cfg.get("device"), "auto")
+    args.dup_iou = float(cfg_value(args.dup_iou, detector_cfg.get("dup_iou"), 0.65))
+    args.detect_every = int(cfg_value(args.detect_every, tracker_cfg.get("detect_every"), 1))
+    args.match_iou = float(cfg_value(args.match_iou, tracker_cfg.get("match_iou"), 0.25))
+    args.max_coast = int(cfg_value(args.max_coast, tracker_cfg.get("max_coast_frames"), 5))
+    args.min_hits = int(cfg_value(args.min_hits, tracker_cfg.get("min_hits"), 3))
+    args.hand_model = str(resolve_project_path(cfg_value(args.hand_model, hand_cfg.get("model_path"), HAND_MODEL_PATH)))
+    args.activity_rate = float(cfg_value(args.activity_rate, runtime_cfg.get("activity_rate_hz"), 10.0))
+
     # --------------------------------------------------------
     # Object Specs
     # --------------------------------------------------------
 
-    specs = build_specs(args)
+    specs = build_specs(args, cfg_body)
 
     # --------------------------------------------------------
     # 摄像头
@@ -665,6 +686,14 @@ def main():
         match_iou=args.match_iou,
         max_coast_frames=args.max_coast,
         min_hits=args.min_hits,
+        merge_iou=float(tracker_cfg.get("merge_iou", 0.60)),
+        merge_contain=float(tracker_cfg.get("merge_contain", 0.80)),
+        merge_streak=int(tracker_cfg.get("merge_streak", 3)),
+        speed_history_size=int(tracker_cfg.get("speed_history_size", 5)),
+        speed_ema_alpha=float(tracker_cfg.get("speed_ema_alpha", 0.35)),
+        max_center_jump_ratio=float(tracker_cfg.get("max_center_jump_ratio", 3.0)),
+        low_confidence_threshold=float(tracker_cfg.get("low_confidence_threshold", 0.10)),
+        coast_speed_decay=float(tracker_cfg.get("coast_speed_decay", 0.80)),
         fps=camera_fps,
         verbose=True,
     )
@@ -679,13 +708,16 @@ def main():
 
         hand_detector = HandDetector(
             model_path=args.hand_model,
-            num_hands=2,
+            num_hands=int(hand_cfg.get("num_hands", 2)),
+            min_hand_detection_confidence=float(hand_cfg.get("min_hand_detection_confidence", 0.5)),
+            min_hand_presence_confidence=float(hand_cfg.get("min_hand_presence_confidence", 0.5)),
+            min_tracking_confidence=float(hand_cfg.get("min_tracking_confidence", 0.5)),
         )
 
     # --------------------------------------------------------
     # Activity Engine
     # --------------------------------------------------------
-    cfg_path = Path(args.config)
+    cfg_path = resolve_project_path(args.config)
     cfg_raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg_body = cfg_raw.get("activity", cfg_raw)
     activity_id = str(cfg_body.get("id", cfg_path.stem))
@@ -693,9 +725,10 @@ def main():
 
     activity_rate = max(0.1, float(args.activity_rate))
     activity_interval = 1.0 / activity_rate
+    window_seconds = max(0.5, float(runtime_cfg.get("window_seconds", 2.0)))
     activity_engine = ActivityEngine(
         cfg_path,
-        window_seconds=2.0,
+        window_seconds=window_seconds,
     )
 
     perception_file = None
@@ -733,6 +766,17 @@ def main():
     print(
         f"Hand detector: "
         f"{'ON' if hand_detector else 'OFF'}"
+    )
+    print(
+        f"YOLO: size={args.size}, imgsz={args.imgsz}, device={args.device}"
+    )
+    print(
+        f"Tracker: detect_every={args.detect_every}, match_iou={args.match_iou:.2f}, "
+        f"max_coast={args.max_coast}, min_hits={args.min_hits}"
+    )
+    print(
+        f"Activity Engine: {activity_rate:.1f}Hz, window={window_seconds:.1f}s, "
+        f"near={activity_engine.near_distance:.0f}px"
     )
     print(
         "按 q 或 ESC 退出"
@@ -834,7 +878,7 @@ def main():
                     )
 
                     # 距离比较近时画一条辅助线
-                    if distance < 180:
+                    if distance <= activity_engine.near_distance:
 
                         hx, hy = (
                             int(hand.wrist[0]),

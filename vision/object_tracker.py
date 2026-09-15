@@ -166,12 +166,17 @@ def _iou_box(a: list[float], b: list[float]) -> float:
 class SimpleTracker:
     def __init__(
         self,
-        match_iou: float = 0.4,      # 提高匹配阈值，减少错误关联
+        match_iou: float = 0.25,     # 与 YAML 保持一致
         max_coast_frames: int = 5,   # 【关键】大幅缩短滑行时间，快速清除残影
         min_hits: int = 3,
         merge_iou: float = 0.6,
         merge_contain: float = 0.8,
-        merge_streak: int = 3,       # 加快合并速度
+        merge_streak: int = 3,
+        speed_history_size: int = 5,
+        speed_ema_alpha: float = 0.35,
+        max_center_jump_ratio: float = 3.0,
+        low_confidence_threshold: float = 0.10,
+        coast_speed_decay: float = 0.80,
         fps: float = 30.0,
     ):
         self.match_iou = match_iou
@@ -192,15 +197,15 @@ class SimpleTracker:
         # ---------------------------------------------------------
         # 使用短窗口中位数抑制检测框抖动造成的单点尖峰，
         # 再通过 EMA 让 Activity Engine 看到的速度更稳定。
-        self.speed_history_size = 5
-        self.speed_ema_alpha = 0.35
+        self.speed_history_size = max(1, int(speed_history_size))
+        self.speed_ema_alpha = min(1.0, max(0.0, float(speed_ema_alpha)))
         # 单次真实检测之间，允许的最大中心位移比例。
         # 以物体自身尺寸作为尺度，避免使用一个全局像素阈值。
-        self.max_center_jump_ratio = 3.0
+        self.max_center_jump_ratio = max(0.0, float(max_center_jump_ratio))
         # 低置信度检测更容易出现 bbox 抖动，因此对极端跳变更严格。
-        self.low_confidence_threshold = 0.10
+        self.low_confidence_threshold = min(1.0, max(0.0, float(low_confidence_threshold)))
         # 丢失检测后的速度衰减；不直接使用 Kalman 预测速度覆盖测量速度。
-        self.coast_speed_decay = 0.80
+        self.coast_speed_decay = min(1.0, max(0.0, float(coast_speed_decay)))
 
     def step(
         self, dets: list[Detection], frame_idx: int, fps: float
@@ -497,9 +502,17 @@ class ObjectTracker:
         imgsz: int = 640,
         dup_iou: float = 0.65,
         detect_every: int = 1,
-        match_iou: float = 0.4,      # 默认提高匹配阈值
-        max_coast_frames: int = 5,   # 默认快速清除
+        match_iou: float = 0.25,
+        max_coast_frames: int = 5,
         min_hits: int = 3,
+        merge_iou: float = 0.6,
+        merge_contain: float = 0.8,
+        merge_streak: int = 3,
+        speed_history_size: int = 5,
+        speed_ema_alpha: float = 0.35,
+        max_center_jump_ratio: float = 3.0,
+        low_confidence_threshold: float = 0.10,
+        coast_speed_decay: float = 0.80,
         fps: float = 30.0,
         verbose: bool = False,
     ):
@@ -510,7 +523,15 @@ class ObjectTracker:
             match_iou=match_iou,
             max_coast_frames=max_coast_frames,
             min_hits=min_hits,
-            fps=fps
+            merge_iou=merge_iou,
+            merge_contain=merge_contain,
+            merge_streak=merge_streak,
+            speed_history_size=speed_history_size,
+            speed_ema_alpha=speed_ema_alpha,
+            max_center_jump_ratio=max_center_jump_ratio,
+            low_confidence_threshold=low_confidence_threshold,
+            coast_speed_decay=coast_speed_decay,
+            fps=fps,
         )
         self.detect_every = max(1, detect_every)
         self.fps = fps

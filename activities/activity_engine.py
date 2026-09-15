@@ -120,13 +120,12 @@ class ActivityEngine:
         self.candidate_since: float | None = None
 
         # State 最短持续时间（支持从 YAML 配置文件中覆盖）
+        # 这里只保留当前 _derive_raw_state 实际会产生的通用状态。
+        # 活动专属状态（例如 STACKED / STRUCTURE_OK）不属于 Engine。
         default_state_persistence = {
             "IDLE": 500.0,
-            "HAND_APPROACHING": 300.0,
             "INTERACTING": 300.0,
-            "HOLDING_OBJECT": 400.0,
             "MOVING_OBJECT": 300.0,
-            "PLACING_OBJECT": 500.0,
         }
         custom_state_persistence = self.config.get("state_persistence_ms", {})
         self.state_persistence_ms = {
@@ -160,7 +159,7 @@ class ActivityEngine:
         self.stopped_speed = float(
             defaults.get(
                 "stopped_speed_px_s",
-                30.0,
+                18.0,
             )
         )
 
