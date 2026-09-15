@@ -37,6 +37,9 @@ class ActiveObjectState:
     # 最近一次放置时间
     placed_since: float | None = None
 
+    # 标记物体在本次停止前是否真正经历过运动（用于精准触发 OBJECT_STOPPED 和 PLACE）
+    has_moved: bool = False
+
     # 每种事件最近一次触发时间
     last_event_at: dict[str, float] = field(default_factory=dict)
 
@@ -87,10 +90,11 @@ class ActivityEngine:
         self.window_seconds = float(window_seconds)
 
         # --------------------------------------------------
-        # 时间历史
+        # 时间历史（设定 maxlen 防止异常情况下的内存膨胀）
         # --------------------------------------------------
-
-        self.history: deque[dict[str, Any]] = deque()
+        # 假设最大帧率为 60fps，预留双倍安全空间
+        max_history_len = int(self.window_seconds * 120)
+        self.history: deque[dict[str, Any]] = deque(maxlen=max_history_len)
 
         # --------------------------------------------------
         # 当前追踪物体
@@ -115,8 +119,8 @@ class ActivityEngine:
         self.candidate_state: str | None = None
         self.candidate_since: float | None = None
 
-        # State 最短持续时间
-        self.state_persistence_ms = {
+        # State 最短持续时间（支持从 YAML 配置文件中覆盖）
+        default_state_persistence = {
             "IDLE": 500.0,
             "OBSERVING": 600.0,
             "HAND_APPROACHING": 300.0,
@@ -124,6 +128,11 @@ class ActivityEngine:
             "HOLDING_OBJECT": 400.0,
             "MOVING_OBJECT": 300.0,
             "PLACING_OBJECT": 500.0,
+        }
+        custom_state_persistence = self.config.get("state_persistence_ms", {})
+        self.state_persistence_ms = {
+            **default_state_persistence,
+            **custom_state_persistence,
         }
 
         # --------------------------------------------------
@@ -171,6 +180,19 @@ class ActivityEngine:
                 450.0,
             )
         )
+
+        # 超时清理过期 Track 的系数
+        self.stale_timeout_seconds = float(
+            defaults.get(
+                "stale_timeout_seconds",
+                self.window_seconds * 2.0,
+            )
+        )
+
+        # 置信度计算相关参数参数化
+        self.place_confidence_base = float(defaults.get("place_confidence_base", 0.88))
+        self.pickup_speed_scale = float(defaults.get("pickup_speed_scale", 400.0))
+        self.moving_speed_scale = float(defaults.get("moving_speed_scale", 500.0))
 
     # ======================================================
     # Public API
@@ -236,59 +258,23 @@ class ActivityEngine:
         ) or []
 
         # --------------------------------------------------
-        # 建立 HAND_NEAR_OBJECT 关系
-        #
-        # key:
-        #     (hand_id, track_id)
-        #
-        # value:
-        #     distance
+        # 建立 HAND_NEAR_OBJECT 关系 (优化映射结构，提升性能)
+        # key: track_id, value: min_distance
         # --------------------------------------------------
 
-        relation_map: dict[
-            tuple[str, int],
-            float,
-        ] = {}
+        relation_map: dict[int, float] = {}
 
         for relation in relations:
-
             if relation.get("type") != "HAND_NEAR_OBJECT":
                 continue
 
-            hand_id = str(
-                relation.get(
-                    "hand_id",
-                    "Unknown",
-                )
-            )
-
-            track_id = int(
-                relation.get(
-                    "track_id",
-                    -1,
-                )
-            )
-
-            distance = float(
-                relation.get(
-                    "distance",
-                    9999.0,
-                )
-            )
-
+            track_id = int(relation.get("track_id", -1))
             if track_id < 0:
                 continue
 
-            key = (
-                hand_id,
-                track_id,
-            )
-
-            relation_map[key] = min(
-                relation_map.get(
-                    key,
-                    float("inf"),
-                ),
+            distance = float(relation.get("distance", 9999.0))
+            relation_map[track_id] = min(
+                relation_map.get(track_id, float("inf")),
                 distance,
             )
 
@@ -406,14 +392,8 @@ class ActivityEngine:
             # 判断手是否靠近
             # --------------------------------------------------
 
-            nearby = any(
-                distance <= self.near_distance
-                for (
-                    _hand_id,
-                    relation_track_id,
-                ), distance in relation_map.items()
-                if relation_track_id == track_id
-            )
+            hand_distance = relation_map.get(track_id)
+            nearby = hand_distance is not None and hand_distance <= self.near_distance
 
             # ==================================================
             # 1. HAND_NEAR_OBJECT
@@ -444,8 +424,7 @@ class ActivityEngine:
                             object_id=object_id,
                             label=label,
                             confidence=self._distance_confidence(
-                                track_id,
-                                relation_map,
+                                hand_distance
                             ),
                         )
                     )
@@ -462,6 +441,9 @@ class ActivityEngine:
 
                 if state.moving_since is None:
                     state.moving_since = now
+
+                # 标记该物体经历了有效的运动过程
+                state.has_moved = True
 
                 # 重新运动后，当前停止周期失效
                 state.stopped_since = None
@@ -504,15 +486,10 @@ class ActivityEngine:
                     now - state.stopped_since
                 ) * 1000.0
 
-                # 必须之前经历过运动
-                has_moved = (
-                    state.moving_since is not None
-                )
-
+                # 必须之前经历过运动才认为这是有效的“停止”
                 if (
-                    has_moved
-                    and stopped_duration_ms
-                    >= self.persistence_ms
+                    state.has_moved
+                    and stopped_duration_ms >= self.persistence_ms
                     and self._can_emit(
                         state,
                         "OBJECT_STOPPED",
@@ -532,9 +509,6 @@ class ActivityEngine:
                             ),
                         )
                     )
-
-                    # 一个完整运动周期结束
-                    state.moving_since = None
 
             # ==================================================
             # 4. PICK_UP
@@ -568,7 +542,7 @@ class ActivityEngine:
                             label=label,
                             confidence=min(
                                 1.0,
-                                0.55 + speed / 400.0,
+                                0.55 + speed / self.pickup_speed_scale,
                             ),
                         )
                     )
@@ -580,16 +554,13 @@ class ActivityEngine:
             # ==================================================
             # 5. PLACE
             #
-            # 物体已经停止
-            # + 手已经离开
-            #
-            # 表示一次通用“放置”行为
+            # 物体经历过运动 + 当前已经停止 + 手离开
             # ==================================================
 
             if (
                 speed <= self.stopped_speed
                 and state.stopped_since is not None
-                and state.moving_since is None
+                and state.has_moved
                 and not nearby
             ):
 
@@ -606,14 +577,16 @@ class ActivityEngine:
                             track_id=track_id,
                             object_id=object_id,
                             label=label,
-                            confidence=0.88,
+                            confidence=self.place_confidence_base,
                         )
                     )
 
                     state.placed_since = now
 
-                    # 清除当前停止周期
+                    # 一次放置行为完成后，重置状态标记
                     state.stopped_since = None
+                    state.moving_since = None
+                    state.has_moved = False
 
         # ==================================================
         # 清理长时间没有出现的 Track
@@ -679,8 +652,7 @@ class ActivityEngine:
         # ----------------------------------------------
 
         hand_near = any(
-            relation.get("type")
-            == "HAND_NEAR_OBJECT"
+            relation.get("type") == "HAND_NEAR_OBJECT"
             for relation in relations
         )
 
@@ -823,7 +795,6 @@ class ActivityEngine:
         防止：
             OBJECT_MOVING
             OBJECT_MOVING
-            OBJECT_MOVING
             ...
         每一帧疯狂输出。
         """
@@ -851,24 +822,10 @@ class ActivityEngine:
 
     def _distance_confidence(
         self,
-        track_id: int,
-        relation_map: dict[
-            tuple[str, int],
-            float,
-        ],
+        distance: float | None,
     ) -> float:
-
-        distance = min(
-            (
-                distance
-                for (
-                    _hand_id,
-                    relation_track_id,
-                ), distance in relation_map.items()
-                if relation_track_id == track_id
-            ),
-            default=self.near_distance,
-        )
+        if distance is None:
+            distance = self.near_distance
 
         return max(
             0.0,
@@ -883,8 +840,8 @@ class ActivityEngine:
             ),
         )
 
-    @staticmethod
     def _speed_confidence(
+        self,
         speed: float,
     ) -> float:
 
@@ -893,7 +850,7 @@ class ActivityEngine:
             min(
                 1.0,
                 0.55
-                + speed / 500.0,
+                + speed / self.moving_speed_scale,
             ),
         )
 
@@ -928,21 +885,13 @@ class ActivityEngine:
 
         当前只清理内部状态，不产生
         OBJECT_DISAPPEARED Event。
-
-        后续如果需要，可以再增加：
-            OBJECT_DISAPPEARED
         """
 
-        stale_ids = []
-
-        for track_id, state in self.objects.items():
-
-            # 超过时间窗口的 Track 清理掉
-            if (
-                now - state.last_seen
-                > self.window_seconds * 2.0
-            ):
-                stale_ids.append(track_id)
+        stale_ids = [
+            track_id
+            for track_id, state in self.objects.items()
+            if now - state.last_seen > self.stale_timeout_seconds
+        ]
 
         for track_id in stale_ids:
             self.objects.pop(
@@ -1030,13 +979,6 @@ class ActivityEngine:
                 },
             },
         }
-
-        # --------------------------------------------------
-        # 使用实际检测到的物体
-        #
-        # 不再写死：
-        #     "paper_cup"
-        # --------------------------------------------------
 
         if track_id is not None:
 
