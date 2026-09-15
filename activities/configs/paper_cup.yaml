@@ -11,19 +11,15 @@ activity:
         - stacked paper cups
       conf: 0.5
 
+  # 这里只保留 ActivityEngine 所需的通用时序参数。
+  # STACKED / STRUCTURE_OK / STEP_COMPLETED / ACTIVITY_COMPLETED
+  # 等活动语义不在这里定义，由 Activity Understanding / VLM 负责。
   engine:
-    # Activity Engine 的通用时序参数；视觉层仍可按需要更高频运行。
     hand_near_distance_px: 120
     moving_speed_px_s: 45
     stopped_speed_px_s: 18
     persistence_ms: 250
     event_cooldown_ms: 450
-    stack_vertical_gap_px: 45
-    stack_horizontal_ratio: 0.65
-
-  completion:
-    # 第一版只做“稳定结构”基础判断，后续可加入结构形状/高度等规则。
-    min_stacked_objects: 3
 
   steps:
     - 拿起纸杯

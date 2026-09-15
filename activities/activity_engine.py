@@ -122,7 +122,6 @@ class ActivityEngine:
         # State 最短持续时间（支持从 YAML 配置文件中覆盖）
         default_state_persistence = {
             "IDLE": 500.0,
-            "OBSERVING": 600.0,
             "HAND_APPROACHING": 300.0,
             "INTERACTING": 300.0,
             "HOLDING_OBJECT": 400.0,
@@ -695,24 +694,6 @@ class ActivityEngine:
         )
 
         # ----------------------------------------------
-        # 当前是否有刚刚停止的物体
-        # ----------------------------------------------
-
-        stopped = any(
-            float(
-                obj.get(
-                    "motion",
-                    {},
-                ).get(
-                    "speed",
-                    0.0,
-                )
-            )
-            <= self.stopped_speed
-            for obj in objects
-        )
-
-        # ----------------------------------------------
         # 状态判断
         # ----------------------------------------------
 
@@ -728,10 +709,9 @@ class ActivityEngine:
         if moving:
             return "MOVING_OBJECT"
 
-        if stopped:
-            return "OBSERVING"
-
-        return "OBSERVING"
+        # 有物体但没有检测到明确的交互/运动事件时，
+        # 统一视为当前没有活动事件。
+        return "IDLE"
 
     def _relation_is_near(self, relation: dict) -> bool:
         """根据当前活动配置判断手-物体距离是否达到“靠近”条件。"""
