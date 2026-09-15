@@ -96,16 +96,22 @@ def serialize_perception(
         wrist = (hand["wrist"]["x"], hand["wrist"]["y"])
         for obj in object_items:
             distance = point_to_bbox_distance(wrist, obj["bbox"])
-            # A generic relation only. Activity-specific thresholds belong to YAML.
-            if distance <= 180.0:
-                confidence = max(0.0, min(1.0, 1.0 - distance / 180.0))
-                relations.append({
-                    "type": "HAND_NEAR_OBJECT",
-                    "hand_id": hand["hand_id"],
-                    "track_id": obj["track_id"],
-                    "distance": _round(distance, 2),
-                    "confidence": _round(confidence, 4),
-                })
+
+            # --------------------------------------------------------
+            # P0：这里只输出“测量结果”，不做活动语义判断。
+            #
+            # 以前这里用固定 180px 直接生成 HAND_NEAR_OBJECT，
+            # 会导致 serializer 和 ActivityEngine/YAML 各自拥有一套
+            # “靠近”定义。现在改成原始手-物体距离，真正的
+            # HAND_NEAR_OBJECT 由 ActivityEngine 根据当前活动配置
+            # hand_near_distance_px 判断。
+            # --------------------------------------------------------
+            relations.append({
+                "type": "HAND_OBJECT_DISTANCE",
+                "hand_id": hand["hand_id"],
+                "track_id": obj["track_id"],
+                "distance": _round(distance, 2),
+            })
 
     return {
         "schema_version": "1.0",

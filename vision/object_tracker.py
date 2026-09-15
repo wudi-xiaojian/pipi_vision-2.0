@@ -53,6 +53,11 @@ class TrackedObject:
     last_measured_center: list[float] | None = None
     last_measured_frame: int | None = None
 
+    # 速度鲁棒化：保存最近几次“真实检测”得到的原始速度。
+    # 这些字段只用于速度估计，不参与追踪匹配。
+    speed_history: list[float] = field(default_factory=list)
+    last_raw_speed_px_s: float = 0.0
+
     @property
     def speed_px_s(self) -> float:
         return float(self.measured_speed_px_s)
@@ -64,6 +69,9 @@ class TrackedObject:
         del d["kf"]
         d["trail"] = self.trail[-30:]
         d["speed_px_s"] = round(self.speed_px_s, 1)
+        # 内部速度滤波状态不写入对外 JSON。
+        d.pop("speed_history", None)
+        d.pop("last_raw_speed_px_s", None)
         if isinstance(self.bbox, np.ndarray):
             d["bbox"] = self.bbox.tolist()
         if isinstance(self.center, np.ndarray):
@@ -179,6 +187,21 @@ class SimpleTracker:
         self.tracks: dict[int, TrackedObject] = {}
         self._next_id = 1
 
+        # ---------------------------------------------------------
+        # 速度测量参数
+        # ---------------------------------------------------------
+        # 使用短窗口中位数抑制检测框抖动造成的单点尖峰，
+        # 再通过 EMA 让 Activity Engine 看到的速度更稳定。
+        self.speed_history_size = 5
+        self.speed_ema_alpha = 0.35
+        # 单次真实检测之间，允许的最大中心位移比例。
+        # 以物体自身尺寸作为尺度，避免使用一个全局像素阈值。
+        self.max_center_jump_ratio = 3.0
+        # 低置信度检测更容易出现 bbox 抖动，因此对极端跳变更严格。
+        self.low_confidence_threshold = 0.10
+        # 丢失检测后的速度衰减；不直接使用 Kalman 预测速度覆盖测量速度。
+        self.coast_speed_decay = 0.80
+
     def step(
         self, dets: list[Detection], frame_idx: int, fps: float
     ) -> list[TrackedObject]:
@@ -221,8 +244,56 @@ class SimpleTracker:
                     dy = cy - t.last_measured_center[1]
                     distance = math.hypot(dx, dy)
                     dt_seconds = frame_delta / (fps if fps > 0 else 30.0)
-                    t.measured_speed_px_s = distance / dt_seconds
 
+                    if dt_seconds > 0:
+                        raw_speed = distance / dt_seconds
+                        t.last_raw_speed_px_s = raw_speed
+
+                        # -------------------------------------------------
+                        # P0：过滤明显异常的中心跳变
+                        # -------------------------------------------------
+                        # 使用上一次真实检测时的 bbox 尺寸作为尺度。
+                        # 正常情况下，同一个物体在一次检测间隔内不应
+                        # 跨越数倍自身尺寸；异常跳变通常来自检测框抖动。
+                        previous_scale = max(
+                            float(t.width),
+                            float(t.height),
+                            1.0,
+                        )
+                        max_allowed_distance = (
+                            previous_scale
+                            * self.max_center_jump_ratio
+                        )
+
+                        extreme_jump = (
+                            distance > max_allowed_distance
+                            and det.confidence < self.low_confidence_threshold
+                        )
+
+                        if not extreme_jump:
+                            t.speed_history.append(raw_speed)
+                            if len(t.speed_history) > self.speed_history_size:
+                                t.speed_history.pop(0)
+
+                            # 中位数先去掉单次尖峰，再做 EMA。
+                            median_speed = float(
+                                np.median(
+                                    np.asarray(t.speed_history, dtype=np.float64)
+                                )
+                            )
+
+                            if t.measured_speed_px_s <= 0.0:
+                                t.measured_speed_px_s = median_speed
+                            else:
+                                t.measured_speed_px_s = (
+                                    (1.0 - self.speed_ema_alpha)
+                                    * t.measured_speed_px_s
+                                    + self.speed_ema_alpha
+                                    * median_speed
+                                )
+
+            # 无论本次速度是否被过滤，都更新“最近一次真实检测”的位置。
+            # 这样异常检测不会让旧位置永久参与后续速度计算。
             t.last_measured_center = [float(cx), float(cy)]
             t.last_measured_frame = frame_idx
 
@@ -252,6 +323,10 @@ class SimpleTracker:
             t.coasting_frames += 1
             t.is_predicted = True
             t.confidence *= 0.90 # 更快降低置信度
+
+            # 预测/滑行帧不能拿 Kalman 的预测位移重新计算 measured_speed。
+            # 只让上一段真实测量速度逐步衰减，避免“丢检后还一直高速”。
+            t.measured_speed_px_s *= self.coast_speed_decay
 
         # 5) 未匹配检测 -> 新建 (增加去重检查)
         for det in unmatched_dets:
@@ -347,6 +422,8 @@ class SimpleTracker:
             measured_speed_px_s=0.0,
             last_measured_center=[float(cx), float(cy)],
             last_measured_frame=frame_idx,
+            speed_history=[],
+            last_raw_speed_px_s=0.0,
         )
         self.tracks[self._next_id] = t
         self._next_id += 1

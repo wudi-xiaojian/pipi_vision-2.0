@@ -1,6 +1,6 @@
-from __future__ import annotations
 
 from collections import deque
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
@@ -258,21 +258,37 @@ class ActivityEngine:
         ) or []
 
         # --------------------------------------------------
-        # 建立 HAND_NEAR_OBJECT 关系 (优化映射结构，提升性能)
-        # key: track_id, value: min_distance
+        # 建立手-物体距离映射
+        # key: track_id, value: 最小手-物体距离
+        #
+        # P0：serializer 只提供 HAND_OBJECT_DISTANCE；
+        # ActivityEngine 在这里根据当前活动 YAML 的
+        # hand_near_distance_px 决定是否属于 HAND_NEAR_OBJECT。
+        # 同时兼容旧 JSONL 中的 HAND_NEAR_OBJECT，方便回放旧数据。
         # --------------------------------------------------
 
         relation_map: dict[int, float] = {}
 
         for relation in relations:
-            if relation.get("type") != "HAND_NEAR_OBJECT":
+            relation_type = relation.get("type")
+            if relation_type not in {
+                "HAND_OBJECT_DISTANCE",
+                "HAND_NEAR_OBJECT",
+            }:
                 continue
 
             track_id = int(relation.get("track_id", -1))
             if track_id < 0:
                 continue
 
-            distance = float(relation.get("distance", 9999.0))
+            try:
+                distance = float(relation.get("distance", 9999.0))
+            except (TypeError, ValueError):
+                continue
+
+            if not math.isfinite(distance):
+                continue
+
             relation_map[track_id] = min(
                 relation_map.get(track_id, float("inf")),
                 distance,
@@ -652,7 +668,11 @@ class ActivityEngine:
         # ----------------------------------------------
 
         hand_near = any(
-            relation.get("type") == "HAND_NEAR_OBJECT"
+            relation.get("type") in {
+                "HAND_OBJECT_DISTANCE",
+                "HAND_NEAR_OBJECT",
+            }
+            and self._relation_is_near(relation)
             for relation in relations
         )
 
@@ -712,6 +732,18 @@ class ActivityEngine:
             return "OBSERVING"
 
         return "OBSERVING"
+
+    def _relation_is_near(self, relation: dict) -> bool:
+        """根据当前活动配置判断手-物体距离是否达到“靠近”条件。"""
+        try:
+            distance = float(relation.get("distance", 9999.0))
+        except (TypeError, ValueError):
+            return False
+
+        if not math.isfinite(distance):
+            return False
+
+        return distance <= self.near_distance
 
     def _stabilize_state(
         self,
@@ -995,3 +1027,4 @@ class ActivityEngine:
             event["event"]["object"] = object_data
 
         return event
+
