@@ -3,44 +3,69 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 import time
+from typing import Any
 
 import yaml
 
 
 @dataclass
 class ActiveObjectState:
+    """单个被追踪物体在 Activity Engine 中的状态。"""
+
     track_id: int
     object_id: str
     label: str
-    last_center: tuple[float, float]
-    last_speed: float = 0.0
 
+    last_center: tuple[float, float]
+
+    last_speed: float = 0.0
+    last_seen: float = 0.0
+
+    # 手靠近物体的开始时间
     near_since: float | None = None
 
-    # 本次运动开始时间
+    # 当前运动周期开始时间
     moving_since: float | None = None
 
-    # 本次进入低速状态的时间
+    # 当前停止周期开始时间
     stopped_since: float | None = None
 
+    # 可能正在拿着物体的开始时间
     held_since: float | None = None
+
+    # 最近一次放置时间
     placed_since: float | None = None
 
+    # 每种事件最近一次触发时间
     last_event_at: dict[str, float] = field(default_factory=dict)
-    last_seen: float = 0.0
 
 
 class ActivityEngine:
-    """Generic temporal reasoning engine.
+    """
+    通用 Activity Engine。
 
-    Vision supplies standardized perception JSON.
-    Activity YAML supplies thresholds and semantic completion rules.
-    The engine emits sparse semantic events for the Agent.
+    职责：
+        1. 接收 Vision Layer 输出的标准化 perception JSON
+        2. 结合时间窗口判断基础行为
+        3. 输出通用 Activity Events
+        4. 输出稳定的通用 Activity State
+
+    不负责：
+        - 判断“纸杯是不是叠好了”
+        - 判断“衣服是不是叠好了”
+        - 判断“画是不是画完了”
+        - 判断具体活动语义
+        - 判断活动是否完成
+
+    这些高级语义判断交给上层 Activity Understanding / VLM。
     """
 
-    def __init__(self, config_path: str | Path, window_seconds: float = 2.0):
+    def __init__(
+        self,
+        config_path: str | Path,
+        window_seconds: float = 2.0,
+    ):
         self.config_path = Path(config_path)
 
         raw = yaml.safe_load(
@@ -51,331 +76,425 @@ class ActivityEngine:
 
         self.activity_id = self.config.get(
             "id",
-            self.config_path.stem
+            self.config_path.stem,
         )
 
         self.activity_name = self.config.get(
             "name",
-            self.activity_id
+            self.activity_id,
         )
 
         self.window_seconds = float(window_seconds)
 
-        self.history: deque[dict] = deque()
+        # --------------------------------------------------
+        # 时间历史
+        # --------------------------------------------------
+
+        self.history: deque[dict[str, Any]] = deque()
+
+        # --------------------------------------------------
+        # 当前追踪物体
+        # --------------------------------------------------
 
         self.objects: dict[int, ActiveObjectState] = {}
 
+        # --------------------------------------------------
+        # Event
+        # --------------------------------------------------
+
         self.event_counter = 0
-        self.last_completed = False
         self.total_event_count = 0
+
+        # --------------------------------------------------
+        # Activity State
+        # --------------------------------------------------
+
         self.last_state = "IDLE"
 
-        defaults = self.config.get("engine", {})
+        # State 防抖
+        self.candidate_state: str | None = None
+        self.candidate_since: float | None = None
 
+        # State 最短持续时间
+        self.state_persistence_ms = {
+            "IDLE": 500.0,
+            "OBSERVING": 600.0,
+            "HAND_APPROACHING": 300.0,
+            "INTERACTING": 300.0,
+            "HOLDING_OBJECT": 400.0,
+            "MOVING_OBJECT": 300.0,
+            "PLACING_OBJECT": 500.0,
+        }
+
+        # --------------------------------------------------
+        # 通用 Engine 参数
+        # --------------------------------------------------
+
+        defaults = self.config.get("engine", {}) or {}
+
+        # 手与物体的最大接近距离
         self.near_distance = float(
             defaults.get(
                 "hand_near_distance_px",
-                120.0
+                120.0,
             )
         )
 
+        # 认为物体正在运动的速度
         self.moving_speed = float(
             defaults.get(
                 "moving_speed_px_s",
-                45.0
+                45.0,
             )
         )
 
+        # 认为物体已经停止的速度
         self.stopped_speed = float(
             defaults.get(
                 "stopped_speed_px_s",
-                30.0
+                30.0,
             )
         )
 
+        # 状态 / 事件必须持续的时间
         self.persistence_ms = float(
             defaults.get(
                 "persistence_ms",
-                250.0
+                250.0,
             )
         )
 
+        # 同一种 Event 两次触发之间的最短间隔
         self.event_cooldown_ms = float(
             defaults.get(
                 "event_cooldown_ms",
-                450.0
+                450.0,
             )
         )
 
-        self.stack_vertical_gap_px = float(
-            defaults.get(
-                "stack_vertical_gap_px",
-                45.0
-            )
-        )
-
-        self.stack_horizontal_ratio = float(
-            defaults.get(
-                "stack_horizontal_ratio",
-                0.65
-            )
-        )
-
-        self.completion = (
-            self.config.get("completion", {}) or {}
-        )
+    # ======================================================
+    # Public API
+    # ======================================================
 
     def reset(self) -> None:
+        """重置 Activity Engine。"""
+
         self.history.clear()
         self.objects.clear()
 
         self.event_counter = 0
-        self.last_completed = False
         self.total_event_count = 0
+
         self.last_state = "IDLE"
 
+        self.candidate_state = None
+        self.candidate_since = None
+
     def update(self, perception: dict) -> list[dict]:
+        """
+        输入一帧 perception，返回这一帧新产生的 Events。
+        """
+
         now = float(
             perception.get(
                 "timestamp",
-                time.time()
+                time.time(),
             )
         )
+
+        # --------------------------------------------------
+        # 保存时间窗口
+        # --------------------------------------------------
 
         self.history.append(perception)
 
         while (
             self.history
-            and now - float(
+            and now
+            - float(
                 self.history[0].get(
                     "timestamp",
-                    now
+                    now,
                 )
-            ) > self.window_seconds
+            )
+            > self.window_seconds
         ):
             self.history.popleft()
 
-        events: list[dict] = []
+        # --------------------------------------------------
+        # 获取 Vision 数据
+        # --------------------------------------------------
 
         objects = perception.get(
             "objects",
-            []
-        ) or []
-
-        hands = perception.get(
-            "hands",
-            []
+            [],
         ) or []
 
         relations = perception.get(
             "relations",
-            []
+            [],
         ) or []
+
+        # --------------------------------------------------
+        # 建立 HAND_NEAR_OBJECT 关系
+        #
+        # key:
+        #     (hand_id, track_id)
+        #
+        # value:
+        #     distance
+        # --------------------------------------------------
 
         relation_map: dict[
             tuple[str, int],
-            float
+            float,
         ] = {}
 
         for relation in relations:
+
             if relation.get("type") != "HAND_NEAR_OBJECT":
                 continue
 
-            key = (
-                str(
-                    relation.get(
-                        "hand_id",
-                        "Unknown"
-                    )
-                ),
-                int(
-                    relation.get(
-                        "track_id",
-                        -1
-                    )
+            hand_id = str(
+                relation.get(
+                    "hand_id",
+                    "Unknown",
                 )
+            )
+
+            track_id = int(
+                relation.get(
+                    "track_id",
+                    -1,
+                )
+            )
+
+            distance = float(
+                relation.get(
+                    "distance",
+                    9999.0,
+                )
+            )
+
+            if track_id < 0:
+                continue
+
+            key = (
+                hand_id,
+                track_id,
             )
 
             relation_map[key] = min(
                 relation_map.get(
                     key,
-                    float("inf")
+                    float("inf"),
                 ),
-                float(
-                    relation.get(
-                        "distance",
-                        9999.0
-                    )
-                )
+                distance,
             )
+
+        # ==================================================
+        # 处理所有物体
+        # ==================================================
+
+        events: list[dict] = []
 
         for obj in objects:
-            tid = int(
+
+            track_id = int(
                 obj.get(
                     "track_id",
-                    -1
+                    -1,
                 )
             )
 
-            if tid < 0:
+            if track_id < 0:
                 continue
+
+            # --------------------------------------------------
+            # 基础物体信息
+            # --------------------------------------------------
+
+            object_id = str(
+                obj.get(
+                    "object_id",
+                    "unknown",
+                )
+            )
+
+            label = str(
+                obj.get(
+                    "label",
+                    object_id,
+                )
+            )
 
             center = obj.get(
                 "center",
-                {}
+                {},
             )
 
             center_xy = (
                 float(
                     center.get(
                         "x",
-                        0.0
+                        0.0,
                     )
                 ),
                 float(
                     center.get(
                         "y",
-                        0.0
+                        0.0,
                     )
-                )
+                ),
             )
+
+            motion = obj.get(
+                "motion",
+                {},
+            ) or {}
 
             speed = float(
-                obj.get(
-                    "motion",
-                    {}
-                ).get(
+                motion.get(
                     "speed",
-                    0.0
+                    0.0,
                 )
             )
 
-            state = self.objects.get(tid)
+            # --------------------------------------------------
+            # 获取 / 创建物体状态
+            # --------------------------------------------------
+
+            state = self.objects.get(track_id)
 
             if state is None:
+
                 state = ActiveObjectState(
-                    tid,
-                    str(
-                        obj.get(
-                            "object_id",
-                            "unknown"
-                        )
-                    ),
-                    str(
-                        obj.get(
-                            "label",
-                            obj.get(
-                                "object_id",
-                                "物体"
-                            )
-                        )
-                    ),
-                    center_xy,
-                    last_seen=now
+                    track_id=track_id,
+                    object_id=object_id,
+                    label=label,
+                    last_center=center_xy,
+                    last_speed=speed,
+                    last_seen=now,
                 )
 
-                self.objects[tid] = state
+                self.objects[track_id] = state
 
                 events.append(
                     self._event(
-                        "OBJECT_APPEARED",
-                        now,
-                        tid,
+                        event_type="OBJECT_APPEARED",
+                        timestamp=now,
+                        track_id=track_id,
+                        object_id=object_id,
+                        label=label,
                         confidence=float(
                             obj.get(
                                 "confidence",
-                                0.0
+                                0.0,
                             )
-                        )
+                        ),
                     )
                 )
 
+            # 更新状态
+            state.object_id = object_id
+            state.label = label
             state.last_center = center_xy
             state.last_speed = speed
             state.last_seen = now
 
             # --------------------------------------------------
-            # 1. 手靠近物体
+            # 判断手是否靠近
             # --------------------------------------------------
+
             nearby = any(
                 distance <= self.near_distance
                 for (
-                    hand_id,
-                    track_id
+                    _hand_id,
+                    relation_track_id,
                 ), distance in relation_map.items()
-                if track_id == tid
+                if relation_track_id == track_id
             )
 
+            # ==================================================
+            # 1. HAND_NEAR_OBJECT
+            # ==================================================
+
             if nearby:
+
                 if state.near_since is None:
                     state.near_since = now
 
                 if (
                     self._persisted(
                         state.near_since,
-                        now
+                        now,
                     )
                     and self._can_emit(
                         state,
                         "HAND_NEAR_OBJECT",
-                        now
+                        now,
                     )
                 ):
+
                     events.append(
                         self._event(
-                            "HAND_NEAR_OBJECT",
-                            now,
-                            tid,
+                            event_type="HAND_NEAR_OBJECT",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
                             confidence=self._distance_confidence(
-                                tid,
-                                relation_map
-                            )
+                                track_id,
+                                relation_map,
+                            ),
                         )
                     )
+
             else:
+
                 state.near_since = None
 
-            # --------------------------------------------------
-            # 2. 物体运动
-            # --------------------------------------------------
+            # ==================================================
+            # 2. OBJECT_MOVING
+            # ==================================================
+
             if speed >= self.moving_speed:
 
-                # 如果重新开始运动，开始一个新的运动周期
                 if state.moving_since is None:
                     state.moving_since = now
 
-                # 只要重新进入运动状态，停止计时立即失效
+                # 重新运动后，当前停止周期失效
                 state.stopped_since = None
 
                 if (
                     self._persisted(
                         state.moving_since,
-                        now
+                        now,
                     )
                     and self._can_emit(
                         state,
                         "OBJECT_MOVING",
-                        now
+                        now,
                     )
                 ):
+
                     events.append(
                         self._event(
-                            "OBJECT_MOVING",
-                            now,
-                            tid,
+                            event_type="OBJECT_MOVING",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
                             confidence=self._speed_confidence(
                                 speed
-                            )
+                            ),
                         )
                     )
 
-            # --------------------------------------------------
-            # 3. 物体停止
-            #
-            # 关键修改：
-            # 不再要求 stopped_since 必须依赖 moving_since
-            # 每次进入低速区间都独立开始计时。
-            # --------------------------------------------------
+            # ==================================================
+            # 3. OBJECT_STOPPED
+            # ==================================================
+
             elif speed <= self.stopped_speed:
 
                 if state.stopped_since is None:
@@ -385,7 +504,7 @@ class ActivityEngine:
                     now - state.stopped_since
                 ) * 1000.0
 
-                # 只有确实经历过运动，才认为这是“运动后的停止”
+                # 必须之前经历过运动
                 has_moved = (
                     state.moving_since is not None
                 )
@@ -397,27 +516,32 @@ class ActivityEngine:
                     and self._can_emit(
                         state,
                         "OBJECT_STOPPED",
-                        now
+                        now,
                     )
                 ):
+
                     events.append(
                         self._event(
-                            "OBJECT_STOPPED",
-                            now,
-                            tid,
+                            event_type="OBJECT_STOPPED",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
                             confidence=self._stopped_confidence(
                                 speed
-                            )
+                            ),
                         )
                     )
 
-                    # 一个完整的运动周期已经结束
-                    # 清除 moving_since，防止同一次停止重复触发
+                    # 一个完整运动周期结束
                     state.moving_since = None
 
-            # --------------------------------------------------
+            # ==================================================
             # 4. PICK_UP
-            # --------------------------------------------------
+            #
+            # 手靠近 + 物体持续运动
+            # ==================================================
+
             if nearby and speed >= self.moving_speed:
 
                 if state.held_since is None:
@@ -426,432 +550,258 @@ class ActivityEngine:
                 if (
                     self._persisted(
                         state.held_since,
-                        now
+                        now,
                     )
                     and self._can_emit(
                         state,
                         "PICK_UP",
-                        now
+                        now,
                     )
                 ):
+
                     events.append(
                         self._event(
-                            "PICK_UP",
-                            now,
-                            tid,
+                            event_type="PICK_UP",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
                             confidence=min(
                                 1.0,
-                                0.55 + speed / 400.0
-                            )
+                                0.55 + speed / 400.0,
+                            ),
                         )
                     )
 
             elif not nearby:
+
                 state.held_since = None
 
-            # --------------------------------------------------
+            # ==================================================
             # 5. PLACE
             #
-            # STOPPED 之后，如果手离开，则认为放置完成。
-            # --------------------------------------------------
+            # 物体已经停止
+            # + 手已经离开
+            #
+            # 表示一次通用“放置”行为
+            # ==================================================
+
             if (
                 speed <= self.stopped_speed
                 and state.stopped_since is not None
                 and state.moving_since is None
                 and not nearby
             ):
+
                 if self._can_emit(
                     state,
                     "PLACE",
-                    now
+                    now,
                 ):
+
                     events.append(
                         self._event(
-                            "PLACE",
-                            now,
-                            tid,
-                            confidence=0.88
+                            event_type="PLACE",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=0.88,
                         )
-
                     )
 
                     state.placed_since = now
 
-                    # 停止周期结束
+                    # 清除当前停止周期
                     state.stopped_since = None
 
-        # ------------------------------------------------------
-        # 6. 堆叠检测
-        # ------------------------------------------------------
-        events.extend(
-            self._detect_stacks(
-                perception,
-                now
-            )
+        # ==================================================
+        # 清理长时间没有出现的 Track
+        # ==================================================
+
+        self._cleanup_stale_objects(
+            now=now,
         )
 
-        # ------------------------------------------------------
-        # 7. 活动完成检测
-        # ------------------------------------------------------
-        completion_event = self._check_completion(
-            perception,
-            now
-        )
-
-        if completion_event is not None:
-            events.append(
-                completion_event
-            )
+        # ==================================================
+        # Event 统计
+        # ==================================================
 
         if events:
             self.total_event_count += len(events)
 
-        self.last_state = self._derive_state(
-            perception
+        # ==================================================
+        # Activity State
+        # ==================================================
+
+        raw_state = self._derive_raw_state(
+            perception=perception,
+        )
+
+        self.last_state = self._stabilize_state(
+            raw_state=raw_state,
+            now=now,
         )
 
         return events
 
-    def _detect_stacks(
+    # ======================================================
+    # Activity State
+    # ======================================================
+
+    def _derive_raw_state(
         self,
         perception: dict,
-        now: float
-    ) -> list[dict]:
+    ) -> str:
+        """
+        根据当前 perception 判断“当前正在发生什么”。
 
-        objs = perception.get(
-            "objects",
-            []
-        ) or []
-
-        events = []
-
-        for i, a in enumerate(objs):
-            for b in objs[i + 1:]:
-
-                if str(
-                    a.get("object_id")
-                ) != str(
-                    b.get("object_id")
-                ):
-                    continue
-
-                tid_a = int(
-                    a.get(
-                        "track_id",
-                        -1
-                    )
-                )
-
-                tid_b = int(
-                    b.get(
-                        "track_id",
-                        -1
-                    )
-                )
-
-                if tid_a < 0 or tid_b < 0:
-                    continue
-
-                bbox_a = self._get_bbox(a)
-                bbox_b = self._get_bbox(b)
-
-                if bbox_a is None or bbox_b is None:
-                    continue
-
-                ax1, ay1, ax2, ay2 = bbox_a
-                bx1, by1, bx2, by2 = bbox_b
-
-                aw = max(
-                    1.0,
-                    ax2 - ax1
-                )
-
-                bw = max(
-                    1.0,
-                    bx2 - bx1
-                )
-
-                ah = max(
-                    1.0,
-                    ay2 - ay1
-                )
-
-                bh = max(
-                    1.0,
-                    by2 - by1
-                )
-
-                horizontal_overlap = max(
-                    0.0,
-                    min(ax2, bx2)
-                    - max(ax1, bx1)
-                )
-
-                overlap_ratio = (
-                    horizontal_overlap
-                    / min(aw, bw)
-                )
-
-                vertical_gap = min(
-                    abs(ay2 - by1),
-                    abs(by2 - ay1)
-                )
-
-                if (
-                    overlap_ratio
-                    >= self.stack_horizontal_ratio
-                    and vertical_gap
-                    <= self.stack_vertical_gap_px
-                ):
-                    key_tid = min(
-                        tid_a,
-                        tid_b
-                    )
-
-                    state = self.objects.get(
-                        key_tid
-                    )
-
-                    if state is None:
-                        continue
-
-                    if self._can_emit(
-                        state,
-                        "STACKED",
-                        now
-                    ):
-                        confidence = min(
-                            1.0,
-                            0.55
-                            + overlap_ratio * 0.4
-                        )
-
-                        events.append(
-                            self._event(
-                                "STACKED",
-                                now,
-                                key_tid,
-                                secondary_track_id=max(
-                                    tid_a,
-                                    tid_b
-                                ),
-                                confidence=confidence
-                            )
-                        )
-
-        return events
-
-    def _check_completion(
-        self,
-        perception: dict,
-        now: float
-    ) -> dict | None:
-
-        if self.last_completed:
-            return None
-
-        required = int(
-            self.completion.get(
-                "min_stacked_objects",
-                0
-            ) or 0
-        )
-
-        if required <= 0:
-            return None
+        注意：
+        这里只判断通用行为，不判断具体活动。
+        """
 
         objects = perception.get(
             "objects",
-            []
+            [],
         ) or []
-
-        if len(objects) < required:
-            return None
-
-        stacked_ids: set[int] = set()
-
-        for sample in self.history:
-
-            sample_objects = sample.get(
-                "objects",
-                []
-            ) or []
-
-            for i, a in enumerate(
-                sample_objects
-            ):
-                for b in sample_objects[i + 1:]:
-
-                    if str(
-                        a.get("object_id")
-                    ) != str(
-                        b.get("object_id")
-                    ):
-                        continue
-
-                    bbox_a = self._get_bbox(a)
-                    bbox_b = self._get_bbox(b)
-
-                    if bbox_a is None or bbox_b is None:
-                        continue
-
-                    ax1, ay1, ax2, ay2 = bbox_a
-                    bx1, by1, bx2, by2 = bbox_b
-
-                    aw = max(
-                        1.0,
-                        ax2 - ax1
-                    )
-
-                    bw = max(
-                        1.0,
-                        bx2 - bx1
-                    )
-
-                    horizontal_overlap = max(
-                        0.0,
-                        min(ax2, bx2)
-                        - max(ax1, bx1)
-                    )
-
-                    overlap_ratio = (
-                        horizontal_overlap
-                        / min(aw, bw)
-                    )
-
-                    vertical_gap = min(
-                        abs(ay2 - by1),
-                        abs(by2 - ay1)
-                    )
-
-                    if (
-                        overlap_ratio
-                        >= self.stack_horizontal_ratio
-                        and vertical_gap
-                        <= self.stack_vertical_gap_px
-                    ):
-                        stacked_ids.add(
-                            int(
-                                a.get(
-                                    "track_id",
-                                    -1
-                                )
-                            )
-                        )
-
-                        stacked_ids.add(
-                            int(
-                                b.get(
-                                    "track_id",
-                                    -1
-                                )
-                            )
-                        )
-
-        stacked_ids.discard(-1)
-
-        if len(stacked_ids) < required:
-            return None
-
-        stable = all(
-            float(
-                o.get(
-                    "motion",
-                    {}
-                ).get(
-                    "speed",
-                    0.0
-                )
-            ) <= self.stopped_speed
-            for o in objects
-        )
-
-        if stable:
-            self.last_completed = True
-
-            confidence = min(
-                1.0,
-                0.65
-                + len(stacked_ids)
-                / max(
-                    required * 4.0,
-                    1.0
-                )
-            )
-
-            return self._event(
-                "ACTIVITY_COMPLETED",
-                now,
-                None,
-                confidence=confidence
-            )
-
-        return None
-
-    def _derive_state(
-        self,
-        perception: dict
-    ) -> str:
-
-        if not perception.get(
-            "objects"
-        ):
-            return "IDLE"
-
-        speeds = [
-            float(
-                o.get(
-                    "motion",
-                    {}
-                ).get(
-                    "speed",
-                    0.0
-                )
-            )
-            for o in perception.get(
-                "objects",
-                []
-            )
-        ]
 
         relations = perception.get(
             "relations",
-            []
+            [],
         ) or []
 
-        if (
-            any(
-                r.get("type")
-                == "HAND_NEAR_OBJECT"
-                for r in relations
+        # 没有检测到物体
+        if not objects:
+            return "IDLE"
+
+        # ----------------------------------------------
+        # 当前是否存在手-物体关系
+        # ----------------------------------------------
+
+        hand_near = any(
+            relation.get("type")
+            == "HAND_NEAR_OBJECT"
+            for relation in relations
+        )
+
+        # ----------------------------------------------
+        # 当前是否有高速运动物体
+        # ----------------------------------------------
+
+        moving = any(
+            float(
+                obj.get(
+                    "motion",
+                    {},
+                ).get(
+                    "speed",
+                    0.0,
+                )
             )
-            and any(
-                s >= self.moving_speed
-                for s in speeds
+            >= self.moving_speed
+            for obj in objects
+        )
+
+        # ----------------------------------------------
+        # 当前是否有刚刚停止的物体
+        # ----------------------------------------------
+
+        stopped = any(
+            float(
+                obj.get(
+                    "motion",
+                    {},
+                ).get(
+                    "speed",
+                    0.0,
+                )
             )
-        ):
+            <= self.stopped_speed
+            for obj in objects
+        )
+
+        # ----------------------------------------------
+        # 状态判断
+        # ----------------------------------------------
+
+        if hand_near and moving:
             return "MOVING_OBJECT"
 
-        if any(
-            r.get("type")
-            == "HAND_NEAR_OBJECT"
-            for r in relations
-        ):
-            return "HAND_APPROACHING"
+        if hand_near:
 
-        if any(
-            s >= self.moving_speed
-            for s in speeds
-        ):
-            return "OBJECT_MOVING"
+            # 如果手靠近物体，但物体没有明显运动，
+            # 表示正在发生交互。
+            return "INTERACTING"
+
+        if moving:
+            return "MOVING_OBJECT"
+
+        if stopped:
+            return "OBSERVING"
 
         return "OBSERVING"
+
+    def _stabilize_state(
+        self,
+        raw_state: str,
+        now: float,
+    ) -> str:
+        """
+        Activity State 防抖。
+
+        不因为单帧变化就立即切换状态。
+        """
+
+        # 当前状态与 raw state 一样
+        if raw_state == self.last_state:
+
+            self.candidate_state = None
+            self.candidate_since = None
+
+            return self.last_state
+
+        # 新候选状态
+        if self.candidate_state != raw_state:
+
+            self.candidate_state = raw_state
+            self.candidate_since = now
+
+            # 第一次出现时保持原状态
+            return self.last_state
+
+        # 候选状态持续时间
+        if self.candidate_since is None:
+            self.candidate_since = now
+            return self.last_state
+
+        duration_ms = (
+            now - self.candidate_since
+        ) * 1000.0
+
+        required_ms = self.state_persistence_ms.get(
+            raw_state,
+            400.0,
+        )
+
+        if duration_ms >= required_ms:
+
+            self.last_state = raw_state
+
+            self.candidate_state = None
+            self.candidate_since = None
+
+        return self.last_state
+
+    # ======================================================
+    # Event 工具
+    # ======================================================
 
     def _persisted(
         self,
         since: float | None,
-        now: float
+        now: float,
     ) -> bool:
+        """判断某个状态是否持续足够长时间。"""
 
         return (
             since is not None
@@ -865,8 +815,18 @@ class ActivityEngine:
         self,
         state: ActiveObjectState,
         event_type: str,
-        now: float
+        now: float,
     ) -> bool:
+        """
+        Event cooldown。
+
+        防止：
+            OBJECT_MOVING
+            OBJECT_MOVING
+            OBJECT_MOVING
+            ...
+        每一帧疯狂输出。
+        """
 
         last = state.last_event_at.get(
             event_type
@@ -881,32 +841,33 @@ class ActivityEngine:
         ):
             return False
 
-        state.last_event_at[
-            event_type
-        ] = now
+        state.last_event_at[event_type] = now
 
         return True
 
+    # ======================================================
+    # Confidence
+    # ======================================================
+
     def _distance_confidence(
         self,
-        tid: int,
+        track_id: int,
         relation_map: dict[
             tuple[str, int],
-            float
-        ]
+            float,
+        ],
     ) -> float:
 
-        d = min(
+        distance = min(
             (
                 distance
                 for (
-                    _,
-                    track_id
-                ), distance
-                in relation_map.items()
-                if track_id == tid
+                    _hand_id,
+                    relation_track_id,
+                ), distance in relation_map.items()
+                if relation_track_id == track_id
             ),
-            default=self.near_distance
+            default=self.near_distance,
         )
 
         return max(
@@ -914,17 +875,17 @@ class ActivityEngine:
             min(
                 1.0,
                 1.0
-                - d
+                - distance
                 / max(
                     self.near_distance,
-                    1.0
-                )
-            )
+                    1.0,
+                ),
+            ),
         )
 
     @staticmethod
     def _speed_confidence(
-        speed: float
+        speed: float,
     ) -> float:
 
         return max(
@@ -932,13 +893,13 @@ class ActivityEngine:
             min(
                 1.0,
                 0.55
-                + speed / 500.0
-            )
+                + speed / 500.0,
+            ),
         )
 
     def _stopped_confidence(
         self,
-        speed: float
+        speed: float,
     ) -> float:
 
         return max(
@@ -949,35 +910,82 @@ class ActivityEngine:
                 - speed
                 / max(
                     self.stopped_speed * 2.0,
-                    1.0
-                )
-            )
+                    1.0,
+                ),
+            ),
         )
+
+    # ======================================================
+    # Object Cleanup
+    # ======================================================
+
+    def _cleanup_stale_objects(
+        self,
+        now: float,
+    ) -> None:
+        """
+        清理已经长时间没有出现在 perception 中的物体。
+
+        当前只清理内部状态，不产生
+        OBJECT_DISAPPEARED Event。
+
+        后续如果需要，可以再增加：
+            OBJECT_DISAPPEARED
+        """
+
+        stale_ids = []
+
+        for track_id, state in self.objects.items():
+
+            # 超过时间窗口的 Track 清理掉
+            if (
+                now - state.last_seen
+                > self.window_seconds * 2.0
+            ):
+                stale_ids.append(track_id)
+
+        for track_id in stale_ids:
+            self.objects.pop(
+                track_id,
+                None,
+            )
+
+    # ======================================================
+    # BBox 工具
+    # ======================================================
 
     @staticmethod
     def _get_bbox(
-        obj: dict
+        obj: dict,
     ) -> tuple[
         float,
         float,
         float,
-        float
+        float,
     ] | None:
 
         bbox = obj.get("bbox")
 
         if (
-            isinstance(bbox, (list, tuple))
+            isinstance(
+                bbox,
+                (list, tuple),
+            )
             and len(bbox) >= 4
         ):
+
             return (
                 float(bbox[0]),
                 float(bbox[1]),
                 float(bbox[2]),
-                float(bbox[3])
+                float(bbox[3]),
             )
 
         return None
+
+    # ======================================================
+    # Event 构造
+    # ======================================================
 
     def _event(
         self,
@@ -985,8 +993,9 @@ class ActivityEngine:
         timestamp: float,
         track_id: int | None,
         *,
+        object_id: str | None = None,
+        label: str | None = None,
         confidence: float,
-        secondary_track_id: int | None = None
     ) -> dict:
 
         self.event_counter += 1
@@ -996,7 +1005,7 @@ class ActivityEngine:
             "timestamp": timestamp,
             "activity": {
                 "id": self.activity_id,
-                "name": self.activity_name
+                "name": self.activity_name,
             },
             "event": {
                 "id": (
@@ -1010,29 +1019,37 @@ class ActivityEngine:
                             0.0,
                             min(
                                 1.0,
-                                confidence
-                            )
+                                confidence,
+                            ),
                         )
                     ),
-                    4
+                    4,
                 ),
                 "actor": {
-                    "type": "child"
+                    "type": "child",
                 },
             },
         }
 
+        # --------------------------------------------------
+        # 使用实际检测到的物体
+        #
+        # 不再写死：
+        #     "paper_cup"
+        # --------------------------------------------------
+
         if track_id is not None:
-            event["event"]["object"] = {
-                "object_id": "paper_cup",
-                "track_id": track_id
+
+            object_data = {
+                "track_id": track_id,
             }
 
-        if secondary_track_id is not None:
-            event["event"][
-                "secondary_object"
-            ] = {
-                "track_id": secondary_track_id
-            }
+            if object_id is not None:
+                object_data["object_id"] = object_id
+
+            if label is not None:
+                object_data["label"] = label
+
+            event["event"]["object"] = object_data
 
         return event
