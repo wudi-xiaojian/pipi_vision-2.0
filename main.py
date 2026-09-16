@@ -464,8 +464,14 @@ def draw_activity_panel(
         cv2.LINE_AA,
     )
     y += 25
-    if events:
-        latest = events[-1]["event"]
+    visible_events = [
+        event
+        for event in events
+        if float(event["event"].get("confidence", 0.0)) > ACTIVITY_DISPLAY_MIN_CONFIDENCE
+    ]
+
+    if visible_events:
+        latest = visible_events[-1]["event"]
         text = f"Event: {latest['type']}  conf={latest['confidence']:.2f}"
     else:
         text = "Event: 无新事件"
@@ -479,6 +485,13 @@ def draw_activity_panel(
         2,
         cv2.LINE_AA,
     )
+
+
+# ============================================================
+# Activity 显示置信度阈值
+# 仅控制终端/OpenCV 面板显示，不影响 ActivityEngine 内部事件生成。
+# ============================================================
+ACTIVITY_DISPLAY_MIN_CONFIDENCE = 0.60
 
 
 # ============================================================
@@ -599,6 +612,13 @@ def main():
     )
 
     parser.add_argument(
+        "--activity-min-confidence",
+        type=float,
+        default=ACTIVITY_DISPLAY_MIN_CONFIDENCE,
+        help="Activity 显示的最低置信度；默认 0.60。仅过滤显示，不影响 ActivityEngine。",
+    )
+
+    parser.add_argument(
         "--activity-jsonl",
         default=None,
         help="输出 Activity Engine 输入 Perception JSONL；不指定则不落盘",
@@ -611,6 +631,8 @@ def main():
     )
 
     args = parser.parse_args()
+
+    args.activity_min_confidence = max(0.0, min(1.0, float(args.activity_min_confidence)))
 
     cfg_body = load_activity_config(args.config)
     detector_cfg = cfg_body.get("vision", {}).get("object_detector", {}) or {}
@@ -968,13 +990,19 @@ def main():
 
                 for event in events:
                     event_type = event["event"]["type"]
-                    confidence = event["event"]["confidence"]
+                    confidence = float(event["event"].get("confidence", 0.0))
                     track_id = event["event"].get("object", {}).get("track_id")
                     object_text = f"  物体#{track_id}" if track_id is not None else ""
-                    print(
-                        f"[Activity] {event_type}{object_text} "
-                        f"置信度={confidence:.2f}"
-                    )
+
+                    # ActivityEngine 仍然保留并输出全部事件。
+                    # 这里只过滤终端显示：只有 confidence > 0.60 才显示。
+                    if confidence > args.activity_min_confidence:
+                        print(
+                            f"[Activity] {event_type}{object_text} "
+                            f"置信度={confidence:.2f}"
+                        )
+
+                    # JSONL 仍保存全部事件，方便后续 VLM / Agent / 调试使用。
                     if event_file is not None:
                         event_file.write(
                             json.dumps(event, ensure_ascii=False) + "\n"
