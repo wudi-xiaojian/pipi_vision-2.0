@@ -26,6 +26,12 @@ from vision.hand_detector import HandDetector
 from vision.hand_types import HandObservation
 from perception_serializer import serialize_perception
 from activities.activity_engine import ActivityEngine
+from activities.activity_understanding import ActivityUnderstanding
+from config.model_config import (
+    VLM_COOLDOWN,
+    VLM_MODEL,
+    VLM_TRIGGER_EVENTS,
+)
 
 
 # ============================================================
@@ -630,7 +636,48 @@ def main():
         help="输出 Activity Engine 事件 JSONL；不指定则不落盘",
     )
 
+    parser.add_argument(
+        "--no-vlm",
+        action="store_true",
+        help="关闭 Qwen-VL 高级活动理解",
+    )
+
+    parser.add_argument(
+        "--vlm-model",
+        default=None,
+        help="临时覆盖 Qwen-VL 模型名称；默认读取 config/model_config.py",
+    )
+
+    parser.add_argument(
+        "--vlm-cooldown",
+        type=float,
+        default=None,
+        help="临时覆盖两次 Qwen-VL 请求之间的最小间隔；默认读取 config/model_config.py",
+    )
+
+    parser.add_argument(
+        "--vlm-events",
+        default=None,
+        help="临时覆盖触发 Qwen-VL 的 ActivityEngine 事件，逗号分隔；默认读取 config/model_config.py",
+    )
+
+    parser.add_argument(
+        "--vlm-jsonl",
+        default=None,
+        help="输出 Qwen-VL 结果 JSONL；不指定则不落盘",
+    )
+
     args = parser.parse_args()
+
+    # --------------------------------------------------------
+    # Qwen-VL 配置统一从 config/model_config.py 读取。
+    # CLI 参数仍然保留，用于临时测试时覆盖配置。
+    # --------------------------------------------------------
+    args.vlm_model = args.vlm_model or VLM_MODEL
+    args.vlm_cooldown = (
+        VLM_COOLDOWN if args.vlm_cooldown is None else args.vlm_cooldown
+    )
+    args.vlm_events = args.vlm_events or ",".join(sorted(VLM_TRIGGER_EVENTS))
 
     args.activity_min_confidence = max(0.0, min(1.0, float(args.activity_min_confidence)))
 
@@ -764,8 +811,41 @@ def main():
         event_path.parent.mkdir(parents=True, exist_ok=True)
         event_file = event_path.open("w", encoding="utf-8")
 
+    # --------------------------------------------------------
+    # Qwen-VL Activity Understanding
+    # --------------------------------------------------------
+    vlm = None
+    vlm_file = None
+
+    if not args.no_vlm:
+        try:
+            trigger_events = {
+                item.strip().upper()
+                for item in str(args.vlm_events).split(",")
+                if item.strip()
+            }
+            vlm = ActivityUnderstanding(
+                activity_id=activity_id,
+                activity_name=activity_name,
+                model=args.vlm_model,
+                cooldown_seconds=float(args.vlm_cooldown),
+                trigger_events=trigger_events,
+            )
+            print(
+                f"Qwen-VL: ON, model={args.vlm_model}, "
+                f"cooldown={args.vlm_cooldown:.1f}s, events={sorted(trigger_events)}"
+            )
+        except Exception as exc:
+            print(f"[VLM] 初始化失败，已自动关闭: {exc}")
+
+    if args.vlm_jsonl:
+        vlm_path = Path(args.vlm_jsonl)
+        vlm_path.parent.mkdir(parents=True, exist_ok=True)
+        vlm_file = vlm_path.open("w", encoding="utf-8")
+
     last_activity_time = 0.0
     last_events = []
+    last_vlm_result = None
 
     # --------------------------------------------------------
     # 运行
@@ -1008,6 +1088,55 @@ def main():
                             json.dumps(event, ensure_ascii=False) + "\n"
                         )
 
+                    # ----------------------------------------------------
+                    # 关键通用事件 -> Qwen-VL
+                    # ActivityEngine 不负责 STACKED / COMPLETED 等活动语义。
+                    # VLM 在后台线程中分析当前帧，避免阻塞摄像头循环。
+                    # ----------------------------------------------------
+                    if vlm is not None:
+                        submitted = vlm.submit(
+                            canvas,
+                            event,
+                            perception,
+                        )
+                        if submitted:
+                            print(f"[VLM] 已提交 {event_type} -> Qwen-VL")
+
+            # ----------------------------------------------------
+            # 读取后台 Qwen-VL 结果
+            # ----------------------------------------------------
+            if vlm is not None:
+                for vlm_result in vlm.poll_results():
+                    last_vlm_result = vlm_result
+
+                    if vlm_result.get("ok"):
+                        result_data = vlm_result.get("result", {})
+                        raw_text = result_data.get("raw_text", "")
+                        parsed = result_data.get("parsed")
+
+                        print("\n[VLM] Qwen-VL 返回:")
+                        print(raw_text)
+                        if parsed is None:
+                            print("[VLM] 警告：返回内容未解析成 JSON。")
+                        else:
+                            print(
+                                "[VLM JSON] "
+                                + json.dumps(parsed, ensure_ascii=False)
+                            )
+
+                        if vlm_file is not None:
+                            vlm_file.write(
+                                json.dumps(vlm_result, ensure_ascii=False) + "\n"
+                            )
+                            vlm_file.flush()
+                    else:
+                        print(f"[VLM] 请求失败: {vlm_result.get('error', 'unknown error')}")
+                        if vlm_file is not None:
+                            vlm_file.write(
+                                json.dumps(vlm_result, ensure_ascii=False) + "\n"
+                            )
+                            vlm_file.flush()
+
             # ------------------------------------------------
             # 信息面板
             # ------------------------------------------------
@@ -1056,6 +1185,18 @@ def main():
         )
 
     finally:
+
+        if vlm is not None:
+            vlm.close()
+
+        if perception_file is not None:
+            perception_file.close()
+
+        if event_file is not None:
+            event_file.close()
+
+        if vlm_file is not None:
+            vlm_file.close()
 
         cap.release()
 

@@ -1,0 +1,65 @@
+activity:
+  id: folding_clothes
+  name: 叠衣服
+
+  objects:
+    - id: shirt
+      name: 衣服
+      prompts:
+        - shirt
+        - t-shirt
+        - clothing
+        - clothes
+        - garment
+        - folded shirt
+        - white shirt
+        - children's shirt
+      conf: 0.5
+
+  vision:
+    object_detector:
+      model_size: s
+      imgsz: 640
+      device: auto
+      dup_iou: 0.65
+
+    tracker:
+      detect_every: 1
+      match_iou: 0.25
+      max_coast_frames: 5
+      min_hits: 3
+      merge_iou: 0.60
+      merge_contain: 0.80
+      merge_streak: 3
+      speed_history_size: 5
+      speed_ema_alpha: 0.35
+      max_center_jump_ratio: 3.0
+      low_confidence_threshold: 0.10
+      coast_speed_decay: 0.80
+
+    hand_detector:
+      model_path: models/hand_landmarker.task
+      num_hands: 2
+      min_hand_detection_confidence: 0.5
+      min_hand_presence_confidence: 0.5
+      min_tracking_confidence: 0.5
+
+  engine:
+    hand_near_distance_px: 120
+    moving_speed_px_s: 45
+    stopped_speed_px_s: 30
+    persistence_ms: 250
+    event_cooldown_ms: 450
+    stale_timeout_seconds: 4.0
+    place_confidence_base: 0.88
+    pickup_speed_scale: 400.0
+    moving_speed_scale: 500.0
+
+  state_persistence_ms:
+    IDLE: 500
+    INTERACTING: 300
+    MOVING_OBJECT: 300
+
+  runtime:
+    activity_rate_hz: 10
+    window_seconds: 2.0
