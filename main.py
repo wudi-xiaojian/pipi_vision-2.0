@@ -491,7 +491,7 @@ def draw_activity_panel(
 # Activity 显示置信度阈值
 # 仅控制终端/OpenCV 面板显示，不影响 ActivityEngine 内部事件生成。
 # ============================================================
-ACTIVITY_DISPLAY_MIN_CONFIDENCE = 0.60
+ACTIVITY_DISPLAY_MIN_CONFIDENCE = 0.01
 
 
 # ============================================================
@@ -519,7 +519,7 @@ def main():
         "-c",
         default=(
             "activities/configs/"
-            "paper_cup.yaml"
+            "stacking_coins.yaml"
         ),
         help="活动 YAML 配置",
     )
