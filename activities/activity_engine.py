@@ -10,20 +10,7 @@ import yaml
 
 @dataclass
 class ActiveObjectState:
-    """
-    单个被追踪物体在 Activity Engine 中的运行状态。
-
-    注意：
-    ActivityEngine 只负责通用行为，不负责具体活动语义。
-
-    例如：
-        STACKED
-        STRUCTURE_OK
-        STEP_COMPLETED
-        ACTIVITY_COMPLETED
-
-    不在这里判断。
-    """
+    """单个被追踪物体在 Activity Engine 中的状态。"""
 
     track_id: int
     object_id: str
@@ -31,68 +18,69 @@ class ActiveObjectState:
 
     last_center: tuple[float, float]
 
+    # 最近一次感知到的速度
     last_speed: float = 0.0
+
+    # 最近一次检测时间
     last_seen: float = 0.0
 
-    # ==========================================================
-    # 当前通用状态
-    # ==========================================================
+    # 最近一次物体检测 confidence
+    last_object_confidence: float = 0.0
 
-    # 手是否处于物体附近
-    near_active: bool = False
-
-    # 物体是否处于运动状态
-    moving_active: bool = False
-
-    # 物体是否处于停止状态
-    stopped_active: bool = False
-
-    # ==========================================================
-    # 状态持续时间
-    # ==========================================================
+    # --------------------------------------------------
+    # 手靠近状态
+    # --------------------------------------------------
 
     near_since: float | None = None
+
+    # 最近一次手物距离
+    last_hand_distance: float | None = None
+
+    # --------------------------------------------------
+    # 运动状态
+    # --------------------------------------------------
+
     moving_since: float | None = None
+
+    # 停止状态开始时间
     stopped_since: float | None = None
 
-    # ==========================================================
-    # 当前交互周期
-    # ==========================================================
+    # --------------------------------------------------
+    # PICK_UP 状态
+    # --------------------------------------------------
 
-    # 是否经历过有效运动
-    has_moved: bool = False
-
-    # 当前交互周期是否已经触发 PICK_UP
-    pickup_emitted: bool = False
-
-    # 当前运动周期是否已经触发 OBJECT_MOVING
-    moving_emitted: bool = False
-
-    # 当前停止周期是否已经触发 OBJECT_STOPPED
-    stopped_emitted: bool = False
-
-    # 当前放置周期是否已经触发 PLACE
-    place_emitted: bool = False
-
-    # ==========================================================
-    # PICK_UP 持续判断
-    # ==========================================================
-
+    # 可能正在拿着物体的开始时间
     held_since: float | None = None
 
-    # ==========================================================
-    # 最近一次 PLACE
-    # ==========================================================
+    # PICK_UP 是否已经成功触发
+    pickup_emitted: bool = False
 
+    # 最近一次 PICK_UP confidence
+    pickup_confidence: float = 0.0
+
+    # --------------------------------------------------
+    # PLACE 状态
+    # --------------------------------------------------
+
+    # 最近一次放置时间
     placed_since: float | None = None
 
-    # ==========================================================
-    # Event 最近触发时间
-    #
-    # 这是第二层保险。
-    #
-    # 真正的“只触发一次”由上面的 *_emitted 状态负责。
-    # ==========================================================
+    # --------------------------------------------------
+    # 当前动作周期
+    # --------------------------------------------------
+
+    # 本次周期中是否经历过有效运动
+    has_moved: bool = False
+
+    # 本次周期中是否已经触发 OBJECT_MOVING
+    moving_emitted: bool = False
+
+    # 本次周期中是否已经触发 OBJECT_STOPPED
+    stopped_emitted: bool = False
+
+    # --------------------------------------------------
+    # Event cooldown
+    # --------------------------------------------------
 
     last_event_at: dict[str, float] = field(default_factory=dict)
 
@@ -101,83 +89,20 @@ class ActivityEngine:
     """
     通用 Activity Engine。
 
-    ------------------------------------------------------------
-    职责
-    ------------------------------------------------------------
+    职责：
+        1. 接收 Vision Layer 输出的标准化 perception JSON
+        2. 根据时间窗口判断基础行为
+        3. 输出通用 Activity Events
+        4. 输出稳定的通用 Activity State
 
-    1. 接收 Vision Layer 输出的标准化 perception JSON
-    2. 根据时间窗口进行基础行为判断
-    3. 维护稳定的通用行为状态
-    4. 输出通用 Activity Events
+    不负责：
+        - 判断“纸杯是不是叠好了”
+        - 判断“衣服是不是叠好了”
+        - 判断“画是不是画完了”
+        - 判断具体活动语义
+        - 判断活动是否完成
 
-    ------------------------------------------------------------
-    输出的通用 Event
-    ------------------------------------------------------------
-
-        OBJECT_APPEARED
-        HAND_NEAR_OBJECT
-        OBJECT_MOVING
-        OBJECT_STOPPED
-        PICK_UP
-        PLACE
-
-    ------------------------------------------------------------
-    不负责
-    ------------------------------------------------------------
-
-        STACKED
-        STRUCTURE_OK
-        STEP_COMPLETED
-        ACTIVITY_COMPLETED
-
-    这些高级活动语义交给：
-
-        Activity Understanding / VLM
-
-    ------------------------------------------------------------
-    核心设计
-    ------------------------------------------------------------
-
-    状态 State 和事件 Event 分离。
-
-    例如：
-
-        HAND_NEAR_OBJECT
-
-    实际上表示：
-
-        “当前手仍然在物体附近”
-
-    但 Event 只在：
-
-        非附近 -> 附近
-
-    这个状态边沿发生时触发一次。
-
-    同理：
-
-        OBJECT_MOVING
-
-    只在：
-
-        非运动 -> 运动
-
-    的时候触发一次。
-
-    这样可以避免：
-
-        OBJECT_MOVING
-        OBJECT_MOVING
-        OBJECT_MOVING
-        OBJECT_MOVING
-
-    以及：
-
-        PICK_UP
-        PICK_UP
-        PICK_UP
-
-    这种重复事件。
+    高级活动语义交给 Activity Understanding / VLM。
     """
 
     def __init__(
@@ -188,15 +113,10 @@ class ActivityEngine:
         self.config_path = Path(config_path)
 
         raw = yaml.safe_load(
-            self.config_path.read_text(
-                encoding="utf-8"
-            )
+            self.config_path.read_text(encoding="utf-8")
         ) or {}
 
-        self.config = raw.get(
-            "activity",
-            raw,
-        )
+        self.config = raw.get("activity", raw)
 
         self.activity_id = self.config.get(
             "id",
@@ -208,62 +128,56 @@ class ActivityEngine:
             self.activity_id,
         )
 
-        self.window_seconds = float(
-            window_seconds
-        )
+        self.window_seconds = float(window_seconds)
 
-        # ======================================================
+        # ==================================================
         # 时间历史
-        # ======================================================
+        # ==================================================
 
-        # 假设最大 60 FPS，预留双倍空间
-        max_history_len = max(
-            1,
-            int(self.window_seconds * 120),
-        )
+        max_history_len = int(self.window_seconds * 120)
 
         self.history: deque[dict[str, Any]] = deque(
             maxlen=max_history_len
         )
 
-        # ======================================================
-        # 当前物体状态
-        # ======================================================
+        # ==================================================
+        # 当前追踪物体
+        # ==================================================
 
         self.objects: dict[int, ActiveObjectState] = {}
 
-        # ======================================================
-        # Event 统计
-        # ======================================================
+        # ==================================================
+        # Event
+        # ==================================================
 
         self.event_counter = 0
         self.total_event_count = 0
 
-        # ======================================================
+        # ==================================================
         # Activity State
-        # ======================================================
+        # ==================================================
 
         self.last_state = "IDLE"
 
         self.candidate_state: str | None = None
         self.candidate_since: float | None = None
 
-        # ======================================================
-        # Activity State 防抖时间
-        # ======================================================
+        # ==================================================
+        # State Persistence
+        # ==================================================
 
         default_state_persistence = {
             "IDLE": 500.0,
+            "HAND_APPROACHING": 300.0,
             "INTERACTING": 300.0,
+            "HOLDING_OBJECT": 400.0,
             "MOVING_OBJECT": 300.0,
+            "PLACING_OBJECT": 500.0,
         }
 
-        custom_state_persistence = (
-            self.config.get(
-                "state_persistence_ms",
-                {},
-            )
-            or {}
+        custom_state_persistence = self.config.get(
+            "state_persistence_ms",
+            {},
         )
 
         self.state_persistence_ms = {
@@ -271,21 +185,18 @@ class ActivityEngine:
             **custom_state_persistence,
         }
 
-        # ======================================================
+        # ==================================================
         # 通用 Engine 参数
-        # ======================================================
+        # ==================================================
 
-        defaults = (
-            self.config.get(
-                "engine",
-                {},
-            )
-            or {}
-        )
+        defaults = self.config.get(
+            "engine",
+            {},
+        ) or {}
 
-        # ------------------------------------------------------
-        # 手-物体接近距离
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # Hand / Object
+        # --------------------------------------------------
 
         self.near_distance = float(
             defaults.get(
@@ -294,9 +205,9 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
-        # 运动阈值
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # Motion
+        # --------------------------------------------------
 
         self.moving_speed = float(
             defaults.get(
@@ -305,12 +216,6 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
-        # 停止阈值
-        #
-        # 当前项目已经验证 30 比 18 更稳定。
-        # ------------------------------------------------------
-
         self.stopped_speed = float(
             defaults.get(
                 "stopped_speed_px_s",
@@ -318,9 +223,9 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
-        # 状态 / 事件持续时间
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # Persistence
+        # --------------------------------------------------
 
         self.persistence_ms = float(
             defaults.get(
@@ -329,12 +234,9 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
+        # --------------------------------------------------
         # Event cooldown
-        #
-        # 现在不是核心去重机制。
-        # 只是作为第二层保险。
-        # ------------------------------------------------------
+        # --------------------------------------------------
 
         self.event_cooldown_ms = float(
             defaults.get(
@@ -343,9 +245,9 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
-        # Stale Track 清理
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # Stale timeout
+        # --------------------------------------------------
 
         self.stale_timeout_seconds = float(
             defaults.get(
@@ -354,10 +256,195 @@ class ActivityEngine:
             )
         )
 
-        # ------------------------------------------------------
-        # Confidence
-        # ------------------------------------------------------
+        # ==================================================
+        # Confidence 配置
+        # ==================================================
 
+        confidence_config = defaults.get(
+            "confidence",
+            {},
+        ) or {}
+
+        # --------------------------------------------------
+        # HAND_NEAR_OBJECT
+        # --------------------------------------------------
+
+        hand_near_config = confidence_config.get(
+            "hand_near",
+            {},
+        ) or {}
+
+        self.hand_near_conf_min = float(
+            hand_near_config.get(
+                "min",
+                0.60,
+            )
+        )
+
+        self.hand_near_conf_max = float(
+            hand_near_config.get(
+                "max",
+                0.98,
+            )
+        )
+
+        # --------------------------------------------------
+        # OBJECT_MOVING
+        # --------------------------------------------------
+
+        moving_config = confidence_config.get(
+            "moving",
+            {},
+        ) or {}
+
+        self.moving_conf_min = float(
+            moving_config.get(
+                "min",
+                0.60,
+            )
+        )
+
+        self.moving_conf_max = float(
+            moving_config.get(
+                "max",
+                0.95,
+            )
+        )
+
+        self.moving_strong_speed = float(
+            moving_config.get(
+                "strong_speed_px_s",
+                max(
+                    self.moving_speed * 4.0,
+                    180.0,
+                ),
+            )
+        )
+
+        # --------------------------------------------------
+        # OBJECT_STOPPED
+        # --------------------------------------------------
+
+        stopped_config = confidence_config.get(
+            "stopped",
+            {},
+        ) or {}
+
+        self.stopped_conf_min = float(
+            stopped_config.get(
+                "min",
+                0.65,
+            )
+        )
+
+        self.stopped_conf_max = float(
+            stopped_config.get(
+                "max",
+                0.98,
+            )
+        )
+
+        # --------------------------------------------------
+        # PICK_UP
+        # --------------------------------------------------
+
+        pickup_config = confidence_config.get(
+            "pickup",
+            {},
+        ) or {}
+
+        self.pickup_hand_weight = float(
+            pickup_config.get(
+                "hand_weight",
+                0.35,
+            )
+        )
+
+        self.pickup_moving_weight = float(
+            pickup_config.get(
+                "moving_weight",
+                0.40,
+            )
+        )
+
+        self.pickup_object_weight = float(
+            pickup_config.get(
+                "object_weight",
+                0.25,
+            )
+        )
+
+        self.pickup_conf_min = float(
+            pickup_config.get(
+                "min",
+                0.65,
+            )
+        )
+
+        self.pickup_conf_max = float(
+            pickup_config.get(
+                "max",
+                0.95,
+            )
+        )
+
+        # --------------------------------------------------
+        # PLACE
+        # --------------------------------------------------
+
+        place_config = confidence_config.get(
+            "place",
+            {},
+        ) or {}
+
+        self.place_pickup_weight = float(
+            place_config.get(
+                "pickup_weight",
+                0.25,
+            )
+        )
+
+        self.place_moving_weight = float(
+            place_config.get(
+                "moving_weight",
+                0.20,
+            )
+        )
+
+        self.place_stopped_weight = float(
+            place_config.get(
+                "stopped_weight",
+                0.30,
+            )
+        )
+
+        self.place_hand_away_weight = float(
+            place_config.get(
+                "hand_away_weight",
+                0.25,
+            )
+        )
+
+        self.place_conf_min = float(
+            place_config.get(
+                "min",
+                0.70,
+            )
+        )
+
+        self.place_conf_max = float(
+            place_config.get(
+                "max",
+                0.95,
+            )
+        )
+
+        # ==================================================
+        # 兼容旧配置
+        # ==================================================
+
+        # 如果 YAML 中没有新的 confidence 配置，
+        # 保留旧参数的兼容性。
         self.place_confidence_base = float(
             defaults.get(
                 "place_confidence_base",
@@ -379,14 +466,12 @@ class ActivityEngine:
             )
         )
 
-    # ==========================================================
+    # ======================================================
     # Public API
-    # ==========================================================
+    # ======================================================
 
     def reset(self) -> None:
-        """
-        重置 Activity Engine。
-        """
+        """重置 Activity Engine。"""
 
         self.history.clear()
         self.objects.clear()
@@ -399,19 +484,9 @@ class ActivityEngine:
         self.candidate_state = None
         self.candidate_since = None
 
-    def update(
-        self,
-        perception: dict,
-    ) -> list[dict]:
+    def update(self, perception: dict) -> list[dict]:
         """
-        输入一帧 perception。
-
-        返回：
-            这一帧新产生的 Events。
-
-        注意：
-            State 会持续维护在内部；
-            Event 只在状态边沿发生时输出。
+        输入一帧 perception，返回这一帧新产生的 Events。
         """
 
         now = float(
@@ -421,16 +496,15 @@ class ActivityEngine:
             )
         )
 
-        # ======================================================
+        # ==================================================
         # 保存时间窗口
-        # ======================================================
+        # ==================================================
 
         self.history.append(perception)
 
         while (
             self.history
-            and
-            now
+            and now
             - float(
                 self.history[0].get(
                     "timestamp",
@@ -441,49 +515,34 @@ class ActivityEngine:
         ):
             self.history.popleft()
 
-        # ======================================================
-        # 获取 Vision 数据
-        # ======================================================
+        # ==================================================
+        # Vision 数据
+        # ==================================================
 
-        objects = (
-            perception.get(
-                "objects",
-                [],
-            )
-            or []
-        )
+        objects = perception.get(
+            "objects",
+            [],
+        ) or []
 
-        relations = (
-            perception.get(
-                "relations",
-                [],
-            )
-            or []
-        )
+        relations = perception.get(
+            "relations",
+            [],
+        ) or []
 
-        # ======================================================
+        # ==================================================
         # 建立手-物体距离映射
         #
-        # Serializer：
+        # key:
+        #     track_id
         #
-        #     HAND_OBJECT_DISTANCE
-        #
-        # ActivityEngine：
-        #
-        #     根据 YAML 判断 HAND_NEAR_OBJECT
-        #
-        # 同时兼容旧：
-        #
-        #     HAND_NEAR_OBJECT
-        # ======================================================
+        # value:
+        #     当前最近手距离
+        # ==================================================
 
         relation_map: dict[int, float] = {}
 
         for relation in relations:
-
-            relation_type = relation.get(
-                "type"
-            )
+            relation_type = relation.get("type")
 
             if relation_type not in {
                 "HAND_OBJECT_DISTANCE",
@@ -498,10 +557,7 @@ class ActivityEngine:
                         -1,
                     )
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 continue
 
             if track_id < 0:
@@ -514,10 +570,7 @@ class ActivityEngine:
                         9999.0,
                     )
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 continue
 
             if not math.isfinite(distance):
@@ -531,9 +584,9 @@ class ActivityEngine:
                 distance,
             )
 
-        # ======================================================
-        # 处理所有物体
-        # ======================================================
+        # ==================================================
+        # 处理物体
+        # ==================================================
 
         events: list[dict] = []
 
@@ -546,18 +599,15 @@ class ActivityEngine:
                         -1,
                     )
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 continue
 
             if track_id < 0:
                 continue
 
-            # ==================================================
-            # 基础物体信息
-            # ==================================================
+            # --------------------------------------------------
+            # 基础信息
+            # --------------------------------------------------
 
             object_id = str(
                 obj.get(
@@ -573,13 +623,10 @@ class ActivityEngine:
                 )
             )
 
-            center = (
-                obj.get(
-                    "center",
-                    {},
-                )
-                or {}
-            )
+            center = obj.get(
+                "center",
+                {},
+            ) or {}
 
             try:
                 center_xy = (
@@ -596,19 +643,17 @@ class ActivityEngine:
                         )
                     ),
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 center_xy = (0.0, 0.0)
 
-            motion = (
-                obj.get(
-                    "motion",
-                    {},
-                )
-                or {}
-            )
+            # --------------------------------------------------
+            # Motion
+            # --------------------------------------------------
+
+            motion = obj.get(
+                "motion",
+                {},
+            ) or {}
 
             try:
                 speed = float(
@@ -617,22 +662,35 @@ class ActivityEngine:
                         0.0,
                     )
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 speed = 0.0
 
             if not math.isfinite(speed):
                 speed = 0.0
 
+            # --------------------------------------------------
+            # Object confidence
+            # --------------------------------------------------
+
+            try:
+                object_confidence = float(
+                    obj.get(
+                        "confidence",
+                        0.0,
+                    )
+                )
+            except (TypeError, ValueError):
+                object_confidence = 0.0
+
+            object_confidence = self._clamp(
+                object_confidence
+            )
+
             # ==================================================
-            # 获取 / 创建物体状态
+            # 获取 / 创建 Track State
             # ==================================================
 
-            state = self.objects.get(
-                track_id
-            )
+            state = self.objects.get(track_id)
 
             if state is None:
 
@@ -643,14 +701,13 @@ class ActivityEngine:
                     last_center=center_xy,
                     last_speed=speed,
                     last_seen=now,
+                    last_object_confidence=object_confidence,
                 )
 
                 self.objects[track_id] = state
 
                 # ----------------------------------------------
                 # OBJECT_APPEARED
-                #
-                # 新 Track 只触发一次
                 # ----------------------------------------------
 
                 events.append(
@@ -660,17 +717,12 @@ class ActivityEngine:
                         track_id=track_id,
                         object_id=object_id,
                         label=label,
-                        confidence=float(
-                            obj.get(
-                                "confidence",
-                                0.0,
-                            )
-                        ),
+                        confidence=object_confidence,
                     )
                 )
 
             # ==================================================
-            # 更新基础信息
+            # 更新状态
             # ==================================================
 
             state.object_id = object_id
@@ -678,173 +730,424 @@ class ActivityEngine:
             state.last_center = center_xy
             state.last_speed = speed
             state.last_seen = now
+            state.last_object_confidence = object_confidence
 
             # ==================================================
-            # 当前手是否靠近
+            # Hand Distance
             # ==================================================
 
-            hand_distance = relation_map.get(
-                track_id
-            )
+            hand_distance = relation_map.get(track_id)
+
+            state.last_hand_distance = hand_distance
 
             nearby = (
                 hand_distance is not None
-                and
-                hand_distance <= self.near_distance
+                and hand_distance <= self.near_distance
             )
 
             # ==================================================
             # 1. HAND_NEAR_OBJECT
-            #
-            # 这是“状态边沿事件”。
-            #
-            # False -> True：
-            #
-            #     触发一次
-            #
-            # True -> True：
-            #
-            #     不再触发
-            #
-            # True -> False：
-            #
-            #     状态结束
             # ==================================================
 
-            self._update_near_state(
-                state=state,
-                nearby=nearby,
-                now=now,
-                hand_distance=hand_distance,
-                events=events,
-                object_id=object_id,
-                label=label,
-                track_id=track_id,
-            )
+            if nearby:
+
+                if state.near_since is None:
+                    state.near_since = now
+
+                if (
+                    self._persisted(
+                        state.near_since,
+                        now,
+                    )
+                    and not self._event_already_active(
+                        state,
+                        "HAND_NEAR_OBJECT",
+                    )
+                    and self._can_emit(
+                        state,
+                        "HAND_NEAR_OBJECT",
+                        now,
+                    )
+                ):
+
+                    confidence = self._distance_confidence(
+                        hand_distance
+                    )
+
+                    events.append(
+                        self._event(
+                            event_type="HAND_NEAR_OBJECT",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=confidence,
+                        )
+                    )
+
+            else:
+
+                # 手离开以后，允许下一次靠近重新触发
+                if state.near_since is not None:
+
+                    state.near_since = None
+
+                    # held_since 也结束
+                    state.held_since = None
 
             # ==================================================
             # 2. OBJECT_MOVING
-            #
-            # 只有：
-            #
-            #     非运动 -> 运动
-            #
-            # 才产生一次 Event。
             # ==================================================
 
             if speed >= self.moving_speed:
 
-                self._handle_moving(
-                    state=state,
-                    now=now,
-                    speed=speed,
-                    events=events,
-                    object_id=object_id,
-                    label=label,
-                    track_id=track_id,
-                )
+                if state.moving_since is None:
+                    state.moving_since = now
+
+                # 有效运动
+                state.has_moved = True
+
+                # 重新运动以后，停止状态失效
+                state.stopped_since = None
+
+                if (
+                    self._persisted(
+                        state.moving_since,
+                        now,
+                    )
+                    and not state.moving_emitted
+                    and self._can_emit(
+                        state,
+                        "OBJECT_MOVING",
+                        now,
+                    )
+                ):
+
+                    confidence = self._moving_confidence(
+                        speed
+                    )
+
+                    events.append(
+                        self._event(
+                            event_type="OBJECT_MOVING",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=confidence,
+                        )
+                    )
+
+                    state.moving_emitted = True
+
+            else:
+
+                # 速度重新回到运动阈值以下，
+                # 当前运动阶段结束。
+                state.moving_since = None
 
             # ==================================================
             # 3. OBJECT_STOPPED
-            #
-            # 只有：
-            #
-            #     MOVING -> STOPPED
-            #
-            # 才产生一次 Event。
             # ==================================================
 
-            elif speed <= self.stopped_speed:
+            if speed <= self.stopped_speed:
 
-                self._handle_stopped(
-                    state=state,
-                    now=now,
-                    speed=speed,
-                    events=events,
-                    object_id=object_id,
-                    label=label,
-                    track_id=track_id,
-                )
+                if state.stopped_since is None:
+                    state.stopped_since = now
+
+                stopped_duration_ms = (
+                    now - state.stopped_since
+                ) * 1000.0
+
+                if (
+                    state.has_moved
+                    and stopped_duration_ms
+                    >= self.persistence_ms
+                    and not state.stopped_emitted
+                    and self._can_emit(
+                        state,
+                        "OBJECT_STOPPED",
+                        now,
+                    )
+                ):
+
+                    confidence = self._stopped_confidence(
+                        speed
+                    )
+
+                    events.append(
+                        self._event(
+                            event_type="OBJECT_STOPPED",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=confidence,
+                        )
+                    )
+
+                    state.stopped_emitted = True
+
+            else:
+
+                # 物体再次运动
+                state.stopped_since = None
+                state.stopped_emitted = False
 
             # ==================================================
             # 4. PICK_UP
             #
             # 条件：
             #
-            #     手靠近
-            #     +
-            #     物体正在运动
-            #     +
-            #     当前交互周期尚未 PICK_UP
+            # 手靠近
+            # +
+            # 物体运动
+            # +
+            # 持续时间
             #
-            # 一个交互周期只触发一次。
+            # confidence：
+            #
+            # hand evidence
+            # +
+            # moving evidence
+            # +
+            # object detection confidence
             # ==================================================
 
             if nearby and speed >= self.moving_speed:
 
-                self._handle_pickup(
-                    state=state,
-                    now=now,
-                    speed=speed,
-                    events=events,
-                    object_id=object_id,
-                    label=label,
-                    track_id=track_id,
-                )
+                if state.held_since is None:
+                    state.held_since = now
+
+                if (
+                    self._persisted(
+                        state.held_since,
+                        now,
+                    )
+                    and not state.pickup_emitted
+                    and self._can_emit(
+                        state,
+                        "PICK_UP",
+                        now,
+                    )
+                ):
+
+                    hand_confidence = (
+                        self._distance_confidence(
+                            hand_distance
+                        )
+                    )
+
+                    moving_confidence = (
+                        self._moving_confidence(
+                            speed
+                        )
+                    )
+
+                    pickup_confidence = (
+                        hand_confidence
+                        * self.pickup_hand_weight
+                        +
+                        moving_confidence
+                        * self.pickup_moving_weight
+                        +
+                        object_confidence
+                        * self.pickup_object_weight
+                    )
+
+                    pickup_confidence = self._bounded_confidence(
+                        pickup_confidence,
+                        self.pickup_conf_min,
+                        self.pickup_conf_max,
+                    )
+
+                    events.append(
+                        self._event(
+                            event_type="PICK_UP",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=pickup_confidence,
+                        )
+                    )
+
+                    # ------------------------------------------
+                    # PICK_UP 成功
+                    # ------------------------------------------
+
+                    state.pickup_emitted = True
+                    state.pickup_confidence = (
+                        pickup_confidence
+                    )
+
+            elif not nearby:
+
+                state.held_since = None
 
             # ==================================================
             # 5. PLACE
             #
-            # 条件：
+            # 严格要求：
             #
-            #     物体之前移动过
-            #     +
-            #     当前已经停止
-            #     +
-            #     手已经离开
+            # PICK_UP
+            # ↓
+            # MOVING
+            # ↓
+            # STOPPED
+            # ↓
+            # HAND AWAY
+            # ↓
+            # PLACE
             #
-            # 一个停止/放置周期只触发一次。
+            # 不允许：
+            #
+            # 物体自己移动
+            # ↓
+            # 停止
+            # ↓
+            # PLACE
             # ==================================================
 
             if (
-                speed <= self.stopped_speed
-                and
-                state.stopped_since is not None
-                and
-                state.has_moved
-                and
-                not nearby
+                state.pickup_emitted
+                and state.has_moved
+                and state.stopped_since is not None
+                and speed <= self.stopped_speed
+                and not nearby
             ):
 
-                self._handle_place(
-                    state=state,
-                    now=now,
-                    events=events,
-                    object_id=object_id,
-                    label=label,
-                    track_id=track_id,
-                )
+                stopped_duration_ms = (
+                    now - state.stopped_since
+                ) * 1000.0
 
-        # ======================================================
-        # 清理 stale Track
-        # ======================================================
+                if (
+                    stopped_duration_ms
+                    >= self.persistence_ms
+                    and self._can_emit(
+                        state,
+                        "PLACE",
+                        now,
+                    )
+                ):
+
+                    # ------------------------------------------
+                    # Pickup evidence
+                    # ------------------------------------------
+
+                    pickup_confidence = (
+                        state.pickup_confidence
+                    )
+
+                    # ------------------------------------------
+                    # Moving evidence
+                    # ------------------------------------------
+
+                    moving_confidence = (
+                        self._moving_confidence(
+                            max(
+                                speed,
+                                self.moving_speed,
+                            )
+                        )
+                    )
+
+                    # ------------------------------------------
+                    # Stopped evidence
+                    # ------------------------------------------
+
+                    stopped_confidence = (
+                        self._stopped_confidence(
+                            speed
+                        )
+                    )
+
+                    # ------------------------------------------
+                    # Hand-away evidence
+                    #
+                    # 手距离越远，越接近“已经放下”
+                    # ------------------------------------------
+
+                    hand_away_confidence = (
+                        self._hand_away_confidence(
+                            hand_distance
+                        )
+                    )
+
+                    # ------------------------------------------
+                    # 多证据融合
+                    # ------------------------------------------
+
+                    place_confidence = (
+                        pickup_confidence
+                        * self.place_pickup_weight
+                        +
+                        moving_confidence
+                        * self.place_moving_weight
+                        +
+                        stopped_confidence
+                        * self.place_stopped_weight
+                        +
+                        hand_away_confidence
+                        * self.place_hand_away_weight
+                    )
+
+                    place_confidence = self._bounded_confidence(
+                        place_confidence,
+                        self.place_conf_min,
+                        self.place_conf_max,
+                    )
+
+                    events.append(
+                        self._event(
+                            event_type="PLACE",
+                            timestamp=now,
+                            track_id=track_id,
+                            object_id=object_id,
+                            label=label,
+                            confidence=place_confidence,
+                        )
+                    )
+
+                    # ------------------------------------------
+                    # PLACE 完成
+                    #
+                    # 开始新的动作周期
+                    # ------------------------------------------
+
+                    state.placed_since = now
+
+                    state.stopped_since = None
+                    state.moving_since = None
+
+                    state.has_moved = False
+
+                    state.pickup_emitted = False
+                    state.pickup_confidence = 0.0
+
+                    state.moving_emitted = False
+                    state.stopped_emitted = False
+
+                    state.held_since = None
+
+        # ==================================================
+        # 清理 stale tracks
+        # ==================================================
 
         self._cleanup_stale_objects(
             now=now
         )
 
-        # ======================================================
+        # ==================================================
         # Event 统计
-        # ======================================================
+        # ==================================================
 
         if events:
-            self.total_event_count += len(
-                events
-            )
+            self.total_event_count += len(events)
 
-        # ======================================================
+        # ==================================================
         # Activity State
-        # ======================================================
+        # ==================================================
 
         raw_state = self._derive_raw_state(
             perception=perception
@@ -857,573 +1160,72 @@ class ActivityEngine:
 
         return events
 
-    # ==========================================================
-    # HAND NEAR
-    # ==========================================================
-
-    def _update_near_state(
-        self,
-        *,
-        state: ActiveObjectState,
-        nearby: bool,
-        now: float,
-        hand_distance: float | None,
-        events: list[dict],
-        object_id: str,
-        label: str,
-        track_id: int,
-    ) -> None:
-        """
-        更新 HAND_NEAR_OBJECT 状态。
-
-        核心原则：
-
-            False -> True
-                触发一次
-
-            True -> True
-                不触发
-
-            True -> False
-                结束当前 near 状态
-
-        """
-
-        # ------------------------------------------------------
-        # 手进入附近
-        # ------------------------------------------------------
-
-        if nearby:
-
-            if not state.near_active:
-
-                state.near_active = True
-                state.near_since = now
-
-                # ----------------------------------------------
-                # 只在第一次进入时触发
-                # ----------------------------------------------
-
-                events.append(
-                    self._event(
-                        event_type="HAND_NEAR_OBJECT",
-                        timestamp=now,
-                        track_id=track_id,
-                        object_id=object_id,
-                        label=label,
-                        confidence=self._distance_confidence(
-                            hand_distance
-                        ),
-                    )
-                )
-
-            elif state.near_since is None:
-
-                state.near_since = now
-
-            return
-
-        # ------------------------------------------------------
-        # 手离开
-        # ------------------------------------------------------
-
-        if state.near_active:
-
-            state.near_active = False
-            state.near_since = None
-
-            # --------------------------------------------------
-            # 当前交互周期结束。
-            #
-            # 下一次手重新靠近时：
-            #
-            #     可以重新 PICK_UP
-            #
-            # --------------------------------------------------
-
-            state.held_since = None
-
-            # --------------------------------------------------
-            # 如果物体已经停止，
-            # 当前完整动作周期可以视为结束。
-            # --------------------------------------------------
-
-            if state.stopped_active:
-
-                state.pickup_emitted = False
-                state.moving_emitted = False
-                state.stopped_emitted = False
-                state.place_emitted = False
-
-            return
-
-    # ==========================================================
-    # MOVING
-    # ==========================================================
-
-    def _handle_moving(
-        self,
-        *,
-        state: ActiveObjectState,
-        now: float,
-        speed: float,
-        events: list[dict],
-        object_id: str,
-        label: str,
-        track_id: int,
-    ) -> None:
-        """
-        处理 OBJECT_MOVING。
-
-        只有：
-
-            非运动 -> 运动
-
-        才触发一次。
-        """
-
-        # ------------------------------------------------------
-        # 第一次进入运动状态
-        # ------------------------------------------------------
-
-        if not state.moving_active:
-
-            state.moving_active = True
-
-            state.moving_since = now
-
-            # 进入运动后，停止状态失效
-            state.stopped_active = False
-            state.stopped_since = None
-
-            # 记录真实运动
-            state.has_moved = True
-
-        else:
-
-            # 已经运动，只保持状态
-            if state.moving_since is None:
-                state.moving_since = now
-
-            state.has_moved = True
-
-            state.stopped_active = False
-            state.stopped_since = None
-
-        # ------------------------------------------------------
-        # persistence
-        # ------------------------------------------------------
-
-        if not self._persisted(
-            state.moving_since,
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 已经发送过 OBJECT_MOVING
-        #
-        # 不再发送。
-        # ------------------------------------------------------
-
-        if state.moving_emitted:
-            return
-
-        # ------------------------------------------------------
-        # 第二层 cooldown
-        # ------------------------------------------------------
-
-        if not self._can_emit(
-            state,
-            "OBJECT_MOVING",
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 触发 Event
-        # ------------------------------------------------------
-
-        events.append(
-            self._event(
-                event_type="OBJECT_MOVING",
-                timestamp=now,
-                track_id=track_id,
-                object_id=object_id,
-                label=label,
-                confidence=self._speed_confidence(
-                    speed
-                ),
-            )
-        )
-
-        state.moving_emitted = True
-
-    # ==========================================================
-    # STOPPED
-    # ==========================================================
-
-    def _handle_stopped(
-        self,
-        *,
-        state: ActiveObjectState,
-        now: float,
-        speed: float,
-        events: list[dict],
-        object_id: str,
-        label: str,
-        track_id: int,
-    ) -> None:
-        """
-        处理 OBJECT_STOPPED。
-
-        必须：
-
-            之前经历过有效运动
-            +
-            速度持续低于 stopped_speed
-
-        才认为是有效停止。
-
-        只触发一次。
-        """
-
-        # ------------------------------------------------------
-        # 第一次进入低速区间
-        # ------------------------------------------------------
-
-        if state.stopped_since is None:
-
-            state.stopped_since = now
-
-        # ------------------------------------------------------
-        # 进入停止状态
-        #
-        # 只有之前正在运动，
-        # 才能形成：
-        #
-        #     MOVING -> STOPPED
-        # ------------------------------------------------------
-
-        if state.moving_active:
-
-            stopped_duration_ms = (
-                now - state.stopped_since
-            ) * 1000.0
-
-            if stopped_duration_ms < self.persistence_ms:
-                return
-
-            # --------------------------------------------------
-            # 状态切换
-            # --------------------------------------------------
-
-            state.moving_active = False
-            state.stopped_active = True
-
-        else:
-
-            # --------------------------------------------------
-            # 如果从来没有运动过，
-            # 不产生 OBJECT_STOPPED。
-            # --------------------------------------------------
-
-            if not state.has_moved:
-                return
-
-            state.stopped_active = True
-
-        # ------------------------------------------------------
-        # 已经发送过 STOPPED
-        # ------------------------------------------------------
-
-        if state.stopped_emitted:
-            return
-
-        # ------------------------------------------------------
-        # 第二层 cooldown
-        # ------------------------------------------------------
-
-        if not self._can_emit(
-            state,
-            "OBJECT_STOPPED",
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 触发 Event
-        # ------------------------------------------------------
-
-        events.append(
-            self._event(
-                event_type="OBJECT_STOPPED",
-                timestamp=now,
-                track_id=track_id,
-                object_id=object_id,
-                label=label,
-                confidence=self._stopped_confidence(
-                    speed
-                ),
-            )
-        )
-
-        state.stopped_emitted = True
-
-    # ==========================================================
-    # PICK UP
-    # ==========================================================
-
-    def _handle_pickup(
-        self,
-        *,
-        state: ActiveObjectState,
-        now: float,
-        speed: float,
-        events: list[dict],
-        object_id: str,
-        label: str,
-        track_id: int,
-    ) -> None:
-        """
-        处理 PICK_UP。
-
-        条件：
-
-            手靠近
-            +
-            物体运动
-            +
-            当前交互周期还没有 PICK_UP
-
-        一个交互周期只触发一次。
-        """
-
-        # ------------------------------------------------------
-        # 当前周期已经 PICK_UP
-        # ------------------------------------------------------
-
-        if state.pickup_emitted:
-            return
-
-        # ------------------------------------------------------
-        # 第一次进入“疑似拿起”
-        # ------------------------------------------------------
-
-        if state.held_since is None:
-
-            state.held_since = now
-
-        # ------------------------------------------------------
-        # 必须持续一定时间
-        # ------------------------------------------------------
-
-        if not self._persisted(
-            state.held_since,
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 第二层 cooldown
-        # ------------------------------------------------------
-
-        if not self._can_emit(
-            state,
-            "PICK_UP",
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 触发 PICK_UP
-        # ------------------------------------------------------
-
-        events.append(
-            self._event(
-                event_type="PICK_UP",
-                timestamp=now,
-                track_id=track_id,
-                object_id=object_id,
-                label=label,
-                confidence=min(
-                    1.0,
-                    0.55
-                    + speed
-                    / max(
-                        self.pickup_speed_scale,
-                        1.0,
-                    ),
-                ),
-            )
-        )
-
-        # ------------------------------------------------------
-        # 锁住当前周期
-        # ------------------------------------------------------
-
-        state.pickup_emitted = True
-
-    # ==========================================================
-    # PLACE
-    # ==========================================================
-
-    def _handle_place(
-        self,
-        *,
-        state: ActiveObjectState,
-        now: float,
-        events: list[dict],
-        object_id: str,
-        label: str,
-        track_id: int,
-    ) -> None:
-        """
-        处理 PLACE。
-
-        条件：
-
-            物体之前移动过
-            +
-            当前停止
-            +
-            手已经离开
-
-        一个完整放置周期只触发一次。
-        """
-
-        # ------------------------------------------------------
-        # 当前周期已经 PLACE
-        # ------------------------------------------------------
-
-        if state.place_emitted:
-            return
-
-        # ------------------------------------------------------
-        # 第二层 cooldown
-        # ------------------------------------------------------
-
-        if not self._can_emit(
-            state,
-            "PLACE",
-            now,
-        ):
-            return
-
-        # ------------------------------------------------------
-        # 触发 PLACE
-        # ------------------------------------------------------
-
-        events.append(
-            self._event(
-                event_type="PLACE",
-                timestamp=now,
-                track_id=track_id,
-                object_id=object_id,
-                label=label,
-                confidence=self.place_confidence_base,
-            )
-        )
-
-        state.place_emitted = True
-        state.placed_since = now
-
-        # ------------------------------------------------------
-        # 完整动作周期结束
-        #
-        # 注意：
-        #
-        # 不马上清除 pickup_emitted，
-        # 因为手可能还没有重新接近。
-        #
-        # 只有下一次新的 near 周期才重新允许 PICK_UP。
-        # ------------------------------------------------------
-
-        state.stopped_since = None
-        state.moving_since = None
-
-        state.has_moved = False
-
-        state.moving_active = False
-        state.stopped_active = False
-
-        state.stopped_emitted = False
-        state.moving_emitted = False
-
-    # ==========================================================
+    # ======================================================
     # Activity State
-    # ==========================================================
+    # ======================================================
 
     def _derive_raw_state(
         self,
         perception: dict,
     ) -> str:
         """
-        根据当前 perception 判断通用 Activity State。
+        根据当前 perception 判断当前通用状态。
 
-        只输出：
-
+        只判断：
             IDLE
             INTERACTING
             MOVING_OBJECT
-
-        不判断具体活动语义。
         """
 
-        objects = (
-            perception.get(
-                "objects",
-                [],
-            )
-            or []
-        )
+        objects = perception.get(
+            "objects",
+            [],
+        ) or []
 
-        relations = (
-            perception.get(
-                "relations",
-                [],
-            )
-            or []
-        )
+        relations = perception.get(
+            "relations",
+            [],
+        ) or []
 
-        # ------------------------------------------------------
+        # --------------------------------------------------
         # 没有物体
-        # ------------------------------------------------------
+        # --------------------------------------------------
 
         if not objects:
             return "IDLE"
 
-        # ------------------------------------------------------
-        # 手是否靠近
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # 手是否靠近物体
+        # --------------------------------------------------
 
-        hand_near = any(
-            relation.get("type")
-            in {
+        hand_near = False
+
+        for relation in relations:
+
+            if relation.get("type") not in {
                 "HAND_OBJECT_DISTANCE",
                 "HAND_NEAR_OBJECT",
-            }
-            and self._relation_is_near(
-                relation
-            )
-            for relation in relations
-        )
+            }:
+                continue
 
-        # ------------------------------------------------------
+            if self._relation_is_near(
+                relation
+            ):
+                hand_near = True
+                break
+
+        # --------------------------------------------------
         # 是否存在运动物体
-        # ------------------------------------------------------
+        # --------------------------------------------------
 
         moving = False
 
         for obj in objects:
 
-            motion = (
-                obj.get(
-                    "motion",
-                    {},
-                )
-                or {}
-            )
+            motion = obj.get(
+                "motion",
+                {},
+            ) or {}
 
             try:
                 speed = float(
@@ -1432,23 +1234,16 @@ class ActivityEngine:
                         0.0,
                     )
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 speed = 0.0
 
-            if (
-                math.isfinite(speed)
-                and
-                speed >= self.moving_speed
-            ):
+            if speed >= self.moving_speed:
                 moving = True
                 break
 
-        # ------------------------------------------------------
-        # 状态判断
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # 状态
+        # --------------------------------------------------
 
         if hand_near and moving:
             return "MOVING_OBJECT"
@@ -1465,10 +1260,7 @@ class ActivityEngine:
         self,
         relation: dict,
     ) -> bool:
-        """
-        根据当前活动配置判断
-        手-物体距离是否属于“靠近”。
-        """
+        """根据活动配置判断手物距离是否达到 near 阈值。"""
 
         try:
             distance = float(
@@ -1477,19 +1269,13 @@ class ActivityEngine:
                     9999.0,
                 )
             )
-        except (
-            TypeError,
-            ValueError,
-        ):
+        except (TypeError, ValueError):
             return False
 
         if not math.isfinite(distance):
             return False
 
-        return (
-            distance
-            <= self.near_distance
-        )
+        return distance <= self.near_distance
 
     def _stabilize_state(
         self,
@@ -1499,12 +1285,12 @@ class ActivityEngine:
         """
         Activity State 防抖。
 
-        不因为单帧变化立即切换。
+        raw_state 不会因为单帧变化立即切换。
         """
 
-        # ------------------------------------------------------
+        # --------------------------------------------------
         # 当前状态没有变化
-        # ------------------------------------------------------
+        # --------------------------------------------------
 
         if raw_state == self.last_state:
 
@@ -1513,9 +1299,9 @@ class ActivityEngine:
 
             return self.last_state
 
-        # ------------------------------------------------------
+        # --------------------------------------------------
         # 新候选状态
-        # ------------------------------------------------------
+        # --------------------------------------------------
 
         if self.candidate_state != raw_state:
 
@@ -1524,9 +1310,9 @@ class ActivityEngine:
 
             return self.last_state
 
-        # ------------------------------------------------------
-        # 没有候选开始时间
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # 防止异常
+        # --------------------------------------------------
 
         if self.candidate_since is None:
 
@@ -1534,24 +1320,18 @@ class ActivityEngine:
 
             return self.last_state
 
-        # ------------------------------------------------------
-        # 候选状态持续时间
-        # ------------------------------------------------------
+        # --------------------------------------------------
+        # 持续时间
+        # --------------------------------------------------
 
         duration_ms = (
             now - self.candidate_since
         ) * 1000.0
 
-        required_ms = float(
-            self.state_persistence_ms.get(
-                raw_state,
-                400.0,
-            )
+        required_ms = self.state_persistence_ms.get(
+            raw_state,
+            400.0,
         )
-
-        # ------------------------------------------------------
-        # 状态切换
-        # ------------------------------------------------------
 
         if duration_ms >= required_ms:
 
@@ -1562,27 +1342,60 @@ class ActivityEngine:
 
         return self.last_state
 
-    # ==========================================================
-    # Event 工具
-    # ==========================================================
+    # ======================================================
+    # Persistence
+    # ======================================================
 
     def _persisted(
         self,
         since: float | None,
         now: float,
     ) -> bool:
-        """
-        判断某个状态是否持续足够长时间。
-        """
+        """判断状态是否持续足够长时间。"""
 
         return (
             since is not None
-            and
-            (
+            and (
                 now - since
             ) * 1000.0
             >= self.persistence_ms
         )
+
+    # ======================================================
+    # Event Deduplication
+    # ======================================================
+
+    def _event_already_active(
+        self,
+        state: ActiveObjectState,
+        event_type: str,
+    ) -> bool:
+        """
+        判断事件是否已经在当前动作周期中触发过。
+
+        HAND_NEAR_OBJECT：
+            一个靠近周期只触发一次。
+        """
+
+        if event_type == "HAND_NEAR_OBJECT":
+            return (
+                state.last_event_at.get(
+                    event_type
+                )
+                is not None
+                and state.near_since is not None
+            )
+
+        if event_type == "OBJECT_MOVING":
+            return state.moving_emitted
+
+        if event_type == "OBJECT_STOPPED":
+            return state.stopped_emitted
+
+        if event_type == "PICK_UP":
+            return state.pickup_emitted
+
+        return False
 
     def _can_emit(
         self,
@@ -1591,141 +1404,345 @@ class ActivityEngine:
         now: float,
     ) -> bool:
         """
-        第二层 Event cooldown。
+        Event cooldown。
 
-        注意：
+        cooldown 只是第二层保护。
 
-        真正的事件去重由：
-
-            pickup_emitted
+        真正防止重复触发的是：
             moving_emitted
             stopped_emitted
-            place_emitted
-
-        等状态锁完成。
-
-        这里仅作为额外保护。
+            pickup_emitted
+            HAND_NEAR_OBJECT 的状态边沿
         """
 
         last = state.last_event_at.get(
             event_type
         )
 
-        if last is not None:
-
-            elapsed_ms = (
+        if (
+            last is not None
+            and (
                 now - last
             ) * 1000.0
-
-            if (
-                elapsed_ms
-                < self.event_cooldown_ms
-            ):
-                return False
+            < self.event_cooldown_ms
+        ):
+            return False
 
         state.last_event_at[event_type] = now
 
         return True
 
-    # ==========================================================
+    # ======================================================
     # Confidence
-    # ==========================================================
+    # ======================================================
+
+    @staticmethod
+    def _clamp(
+        value: float,
+    ) -> float:
+        """限制到 [0, 1]。"""
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                float(value),
+            ),
+        )
+
+    @staticmethod
+    def _bounded_confidence(
+        value: float,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        """
+        把 confidence 限制在指定区间。
+
+        例如：
+            pickup min = 0.65
+            pickup max = 0.95
+
+        则最终：
+            0.50 -> 0.65
+            0.80 -> 0.80
+            0.99 -> 0.95
+        """
+
+        minimum = max(
+            0.0,
+            min(
+                1.0,
+                minimum,
+            ),
+        )
+
+        maximum = max(
+            minimum,
+            min(
+                1.0,
+                maximum,
+            ),
+        )
+
+        return max(
+            minimum,
+            min(
+                maximum,
+                float(value),
+            ),
+        )
+
+    # ------------------------------------------------------
+    # Hand Near
+    # ------------------------------------------------------
 
     def _distance_confidence(
         self,
         distance: float | None,
     ) -> float:
         """
-        根据手-物体距离计算接近置信度。
+        手越靠近物体，confidence 越高。
+
+        distance = 0
+            -> hand_near_conf_max
+
+        distance = near_distance
+            -> hand_near_conf_min
         """
 
         if distance is None:
-            distance = self.near_distance
+            return self.hand_near_conf_min
 
-        return max(
+        try:
+            distance = float(distance)
+        except (TypeError, ValueError):
+            return self.hand_near_conf_min
+
+        if not math.isfinite(distance):
+            return self.hand_near_conf_min
+
+        distance = max(
             0.0,
-            min(
-                1.0,
-                1.0
-                - distance
-                / max(
-                    self.near_distance,
-                    1.0,
-                ),
-            ),
+            distance,
         )
 
-    def _speed_confidence(
+        if distance >= self.near_distance:
+            return self.hand_near_conf_min
+
+        if self.near_distance <= 0:
+            return self.hand_near_conf_max
+
+        ratio = (
+            distance
+            / self.near_distance
+        )
+
+        confidence = (
+            self.hand_near_conf_max
+            - ratio
+            * (
+                self.hand_near_conf_max
+                - self.hand_near_conf_min
+            )
+        )
+
+        return self._clamp(
+            confidence
+        )
+
+    # ------------------------------------------------------
+    # Moving
+    # ------------------------------------------------------
+
+    def _moving_confidence(
         self,
         speed: float,
     ) -> float:
         """
-        根据运动速度计算运动置信度。
+        根据物体速度计算运动 confidence。
+
+        moving_speed
+            -> moving_conf_min
+
+        strong_speed
+            -> moving_conf_max
         """
 
-        return max(
-            0.0,
-            min(
-                1.0,
-                0.55
-                + speed
-                / max(
-                    self.moving_speed_scale,
-                    1.0,
-                ),
-            ),
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            return self.moving_conf_min
+
+        if not math.isfinite(speed):
+            return self.moving_conf_min
+
+        if speed <= self.moving_speed:
+            return self.moving_conf_min
+
+        if (
+            self.moving_strong_speed
+            <= self.moving_speed
+        ):
+            return self.moving_conf_max
+
+        ratio = (
+            speed - self.moving_speed
+        ) / (
+            self.moving_strong_speed
+            - self.moving_speed
         )
+
+        ratio = self._clamp(
+            ratio
+        )
+
+        confidence = (
+            self.moving_conf_min
+            + ratio
+            * (
+                self.moving_conf_max
+                - self.moving_conf_min
+            )
+        )
+
+        return self._clamp(
+            confidence
+        )
+
+    # ------------------------------------------------------
+    # Stopped
+    # ------------------------------------------------------
 
     def _stopped_confidence(
         self,
         speed: float,
     ) -> float:
         """
-        根据当前速度计算停止置信度。
+        速度越接近 0，停止 confidence 越高。
+
+        speed = 0
+            -> stopped_conf_max
+
+        speed = stopped_speed
+            -> stopped_conf_min
         """
 
-        return max(
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            return self.stopped_conf_min
+
+        if not math.isfinite(speed):
+            return self.stopped_conf_min
+
+        speed = max(
             0.0,
-            min(
-                1.0,
-                0.98
-                - speed
-                / max(
-                    self.stopped_speed * 2.0,
-                    1.0,
-                ),
-            ),
+            speed,
         )
 
-    # ==========================================================
+        if speed >= self.stopped_speed:
+            return self.stopped_conf_min
+
+        if self.stopped_speed <= 0:
+            return self.stopped_conf_max
+
+        ratio = (
+            speed
+            / self.stopped_speed
+        )
+
+        confidence = (
+            self.stopped_conf_max
+            - ratio
+            * (
+                self.stopped_conf_max
+                - self.stopped_conf_min
+            )
+        )
+
+        return self._clamp(
+            confidence
+        )
+
+    # ------------------------------------------------------
+    # Hand Away
+    # ------------------------------------------------------
+
+    def _hand_away_confidence(
+        self,
+        distance: float | None,
+    ) -> float:
+        """
+        计算“手已经离开物体”的 confidence。
+
+        逻辑：
+
+            distance <= near_distance
+                -> 低
+
+            distance >= 2 * near_distance
+                -> 高
+        """
+
+        if distance is None:
+            return 0.95
+
+        try:
+            distance = float(distance)
+        except (TypeError, ValueError):
+            return 0.80
+
+        if not math.isfinite(distance):
+            return 0.80
+
+        if distance <= self.near_distance:
+            return 0.20
+
+        strong_away_distance = (
+            self.near_distance * 2.0
+        )
+
+        if distance >= strong_away_distance:
+            return 0.95
+
+        ratio = (
+            distance
+            - self.near_distance
+        ) / (
+            strong_away_distance
+            - self.near_distance
+        )
+
+        return (
+            0.20
+            + ratio * 0.75
+        )
+
+    # ======================================================
     # Object Cleanup
-    # ==========================================================
+    # ======================================================
 
     def _cleanup_stale_objects(
         self,
         now: float,
     ) -> None:
         """
-        清理长时间没有出现的 Track。
+        清理长时间没有出现在 perception 中的 Track。
 
-        当前只清理内部状态。
-
-        不产生：
-
-            OBJECT_DISAPPEARED
+        当前只清理内部状态，
+        不产生 OBJECT_DISAPPEARED Event。
         """
 
-        stale_ids = []
-
-        for track_id, state in self.objects.items():
-
+        stale_ids = [
+            track_id
+            for track_id, state
+            in self.objects.items()
             if (
                 now - state.last_seen
                 > self.stale_timeout_seconds
-            ):
-                stale_ids.append(
-                    track_id
-                )
+            )
+        ]
 
         for track_id in stale_ids:
 
@@ -1734,9 +1751,9 @@ class ActivityEngine:
                 None,
             )
 
-    # ==========================================================
+    # ======================================================
     # BBox 工具
-    # ==========================================================
+    # ======================================================
 
     @staticmethod
     def _get_bbox(
@@ -1747,13 +1764,6 @@ class ActivityEngine:
         float,
         float,
     ] | None:
-        """
-        获取物体 BBox。
-
-        当前 ActivityEngine 核心逻辑暂时不依赖 BBox，
-        但保留该工具，方便后续 Activity Understanding
-        或通用规则扩展。
-        """
 
         bbox = obj.get("bbox")
 
@@ -1762,9 +1772,9 @@ class ActivityEngine:
                 bbox,
                 (list, tuple),
             )
-            and
-            len(bbox) >= 4
+            and len(bbox) >= 4
         ):
+
             try:
                 return (
                     float(bbox[0]),
@@ -1772,17 +1782,14 @@ class ActivityEngine:
                     float(bbox[2]),
                     float(bbox[3]),
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 return None
 
         return None
 
-    # ==========================================================
+    # ======================================================
     # Event 构造
-    # ==========================================================
+    # ======================================================
 
     def _event(
         self,
@@ -1794,37 +1801,34 @@ class ActivityEngine:
         label: str | None = None,
         confidence: float,
     ) -> dict:
-        """
-        构造统一 Activity Event。
-        """
 
         self.event_counter += 1
 
         event = {
             "schema_version": "1.0",
+
             "timestamp": timestamp,
+
             "activity": {
                 "id": self.activity_id,
                 "name": self.activity_name,
             },
+
             "event": {
                 "id": (
                     f"evt_"
                     f"{self.event_counter:06d}"
                 ),
+
                 "type": event_type,
+
                 "confidence": round(
-                    float(
-                        max(
-                            0.0,
-                            min(
-                                1.0,
-                                confidence,
-                            ),
-                        )
+                    self._clamp(
+                        confidence
                     ),
                     4,
                 ),
+
                 "actor": {
                     "type": "child",
                 },
@@ -1843,8 +1847,6 @@ class ActivityEngine:
             if label is not None:
                 object_data["label"] = label
 
-            event["event"]["object"] = (
-                object_data
-            )
+            event["event"]["object"] = object_data
 
         return event
