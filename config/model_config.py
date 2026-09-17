@@ -3,7 +3,7 @@
 # ============================================================
 
 ACTIVITY_CONFIG_PATH = (
-    "activities/configs/stacking_coins.yaml"
+    "activities/configs/paper_cup.yaml"
 )
 
 ACTIVITY_DISPLAY_MIN_CONFIDENCE = 0.01
@@ -32,35 +32,12 @@ HAND_MIN_TRACKING_CONFIDENCE = 0.5
 
 
 # ============================================================
-# Object Detector
-# ============================================================
-
-OBJECT_MODEL_SIZE = "s"
-OBJECT_IMGSZ = 640
-OBJECT_DEVICE = "auto"
-OBJECT_DUP_IOU = 0.65
-
-PROMPT_OBJECT_CONFIDENCE = 0.02
-
-
-# ============================================================
 # Tracker
+#
+# 注意：
+# Tracker 的活动相关参数已经迁移到 Activity YAML。
+# 这里不再保留 Tracker 全局默认值。
 # ============================================================
-
-TRACKER_DETECT_EVERY = 1
-TRACKER_MATCH_IOU = 0.25
-TRACKER_MAX_COAST_FRAMES = 5
-TRACKER_MIN_HITS = 3
-
-TRACKER_MERGE_IOU = 0.60
-TRACKER_MERGE_CONTAIN = 0.80
-TRACKER_MERGE_STREAK = 3
-
-TRACKER_SPEED_HISTORY_SIZE = 5
-TRACKER_SPEED_EMA_ALPHA = 0.35
-TRACKER_MAX_CENTER_JUMP_RATIO = 3.0
-TRACKER_LOW_CONFIDENCE_THRESHOLD = 0.10
-TRACKER_COAST_SPEED_DECAY = 0.80
 
 
 # ============================================================

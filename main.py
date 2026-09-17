@@ -39,23 +39,6 @@ from config.model_config import (
     HAND_MIN_PRESENCE_CONFIDENCE,
     HAND_MIN_TRACKING_CONFIDENCE,
     HAND_NUM_HANDS,
-    OBJECT_DEVICE,
-    OBJECT_DUP_IOU,
-    OBJECT_IMGSZ,
-    OBJECT_MODEL_SIZE,
-    PROMPT_OBJECT_CONFIDENCE,
-    TRACKER_COAST_SPEED_DECAY,
-    TRACKER_DETECT_EVERY,
-    TRACKER_LOW_CONFIDENCE_THRESHOLD,
-    TRACKER_MATCH_IOU,
-    TRACKER_MAX_CENTER_JUMP_RATIO,
-    TRACKER_MAX_COAST_FRAMES,
-    TRACKER_MERGE_CONTAIN,
-    TRACKER_MERGE_IOU,
-    TRACKER_MERGE_STREAK,
-    TRACKER_MIN_HITS,
-    TRACKER_SPEED_EMA_ALPHA,
-    TRACKER_SPEED_HISTORY_SIZE,
     VLM_COOLDOWN,
     VLM_MODEL,
     VLM_TRIGGER_EVENTS,
@@ -99,7 +82,8 @@ def build_specs(
     从 YAML 构建物体规格。
 
     --prompt 仅作为临时覆盖入口。
-    prompt 的默认检测置信度统一从 config/model_config.py 读取。
+    prompt 的默认检测置信度读取当前 Activity YAML 的
+    vision.object_detector.prompt_confidence。
     """
     if args.prompt:
         return [
@@ -107,7 +91,16 @@ def build_specs(
                 id=p.replace(" ", "_"),
                 name_cn=p,
                 prompts=[p],
-                conf=PROMPT_OBJECT_CONFIDENCE,
+                conf=float(
+                    required_activity_value(
+                        cfg_body.get("vision", {}).get(
+                            "object_detector",
+                            {},
+                        ) or {},
+                        "prompt_confidence",
+                        "object_detector",
+                    )
+                ),
             )
             for p in args.prompt
         ]
@@ -132,7 +125,10 @@ def cfg_value(
 
     1. CLI 显式传值
     2. Activity YAML
-    3. config/model_config.py
+    3. 全局 config/model_config.py（仅用于真正的共享配置）
+
+    注意：Object Detector 和 Tracker 的活动相关参数不允许
+    从全局 model_config.py 兜底。
     """
     return (
         default
@@ -143,6 +139,21 @@ def cfg_value(
             else args_value
         )
     )
+
+
+def required_activity_value(
+    config: dict,
+    key: str,
+    section: str,
+):
+    """读取 Activity YAML 中必须存在的活动级配置。"""
+    value = config.get(key)
+    if value is None:
+        raise ValueError(
+            f"Activity YAML 缺少必需配置: "
+            f"vision.{section}.{key}"
+        )
+    return value
 
 
 # ============================================================
@@ -919,72 +930,106 @@ def main():
     # ========================================================
     # 参数解析优先级
     #
-    # CLI
-    #   ↓
-    # Activity YAML
-    #   ↓
-    # config/model_config.py
+    # Object Detector / Tracker：
+    #   CLI
+    #     ↓
+    #   当前 Activity YAML
+    #
+    # 不再从 config/model_config.py 获取活动级检测器/跟踪器参数。
+    # 这样切换活动时，只需要切换 Activity YAML。
     # ========================================================
 
-    args.size = cfg_value(
-        args.size,
-        detector_cfg.get("model_size"),
-        OBJECT_MODEL_SIZE,
+    # --------------------------------------------------------
+    # Object Detector：必须由当前 Activity YAML 提供默认值
+    # --------------------------------------------------------
+
+    args.size = (
+        args.size
+        if args.size is not None
+        else required_activity_value(
+            detector_cfg,
+            "model_size",
+            "object_detector",
+        )
     )
 
     args.imgsz = int(
-        cfg_value(
-            args.imgsz,
-            detector_cfg.get("imgsz"),
-            OBJECT_IMGSZ,
+        args.imgsz
+        if args.imgsz is not None
+        else required_activity_value(
+            detector_cfg,
+            "imgsz",
+            "object_detector",
         )
     )
 
-    args.device = cfg_value(
-        args.device,
-        detector_cfg.get("device"),
-        OBJECT_DEVICE,
+    args.device = (
+        args.device
+        if args.device is not None
+        else required_activity_value(
+            detector_cfg,
+            "device",
+            "object_detector",
+        )
     )
 
     args.dup_iou = float(
-        cfg_value(
-            args.dup_iou,
-            detector_cfg.get("dup_iou"),
-            OBJECT_DUP_IOU,
+        args.dup_iou
+        if args.dup_iou is not None
+        else required_activity_value(
+            detector_cfg,
+            "dup_iou",
+            "object_detector",
         )
     )
 
+    # --------------------------------------------------------
+    # Tracker：同样完全由当前 Activity YAML 控制
+    # --------------------------------------------------------
+
     args.detect_every = int(
-        cfg_value(
-            args.detect_every,
-            tracker_cfg.get("detect_every"),
-            TRACKER_DETECT_EVERY,
+        args.detect_every
+        if args.detect_every is not None
+        else required_activity_value(
+            tracker_cfg,
+            "detect_every",
+            "tracker",
         )
     )
 
     args.match_iou = float(
-        cfg_value(
-            args.match_iou,
-            tracker_cfg.get("match_iou"),
-            TRACKER_MATCH_IOU,
+        args.match_iou
+        if args.match_iou is not None
+        else required_activity_value(
+            tracker_cfg,
+            "match_iou",
+            "tracker",
         )
     )
 
     args.max_coast = int(
-        cfg_value(
-            args.max_coast,
-            tracker_cfg.get("max_coast_frames"),
-            TRACKER_MAX_COAST_FRAMES,
+        args.max_coast
+        if args.max_coast is not None
+        else required_activity_value(
+            tracker_cfg,
+            "max_coast_frames",
+            "tracker",
         )
     )
 
     args.min_hits = int(
-        cfg_value(
-            args.min_hits,
-            tracker_cfg.get("min_hits"),
-            TRACKER_MIN_HITS,
+        args.min_hits
+        if args.min_hits is not None
+        else required_activity_value(
+            tracker_cfg,
+            "min_hits",
+            "tracker",
         )
     )
+
+    # --------------------------------------------------------
+    # Hand Detector：保留 YAML > 全局共享 config 的机制
+    # --------------------------------------------------------
 
     args.hand_model = str(
         resolve_project_path(
@@ -1066,58 +1111,66 @@ def main():
         min_hits=args.min_hits,
 
         merge_iou=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "merge_iou",
-                TRACKER_MERGE_IOU,
+                "tracker",
             )
         ),
 
         merge_contain=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "merge_contain",
-                TRACKER_MERGE_CONTAIN,
+                "tracker",
             )
         ),
 
         merge_streak=int(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "merge_streak",
-                TRACKER_MERGE_STREAK,
+                "tracker",
             )
         ),
 
         speed_history_size=int(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "speed_history_size",
-                TRACKER_SPEED_HISTORY_SIZE,
+                "tracker",
             )
         ),
 
         speed_ema_alpha=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "speed_ema_alpha",
-                TRACKER_SPEED_EMA_ALPHA,
+                "tracker",
             )
         ),
 
         max_center_jump_ratio=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "max_center_jump_ratio",
-                TRACKER_MAX_CENTER_JUMP_RATIO,
+                "tracker",
             )
         ),
 
         low_confidence_threshold=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "low_confidence_threshold",
-                TRACKER_LOW_CONFIDENCE_THRESHOLD,
+                "tracker",
             )
         ),
 
         coast_speed_decay=float(
-            tracker_cfg.get(
+            required_activity_value(
+                tracker_cfg,
                 "coast_speed_decay",
-                TRACKER_COAST_SPEED_DECAY,
+                "tracker",
             )
         ),
 
